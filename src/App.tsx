@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Library, { type Shared } from './components/Library'
 import Reader from './components/Reader'
 import Words from './components/Words'
+import Tour from './components/Tour'
 import { useSettings } from './lib/settings'
 import { ARABIC_FONTS } from './types'
 
@@ -47,8 +48,20 @@ export default function App() {
     st.setProperty('--arabic-leading', f.leading)
   }, [settings.arabicFont])
 
-  if (route[0] === 'read' && route[1]) return <Reader key={route[1]} id={route[1]} />
-  if (route[0] === 'words') return <Words />
-  if (route[0] === 'sync' && route[1]) return <Library key="join" joinCode={route[1].toUpperCase()} />
-  return <Library shared={shared} />
+  const screen =
+    route[0] === 'read' && route[1] ? (
+      <Reader key={route[1]} id={route[1]} />
+    ) : route[0] === 'words' ? (
+      <Words />
+    ) : route[0] === 'sync' && route[1] ? (
+      <Library key="join" joinCode={route[1].toUpperCase()} />
+    ) : (
+      <Library shared={shared} />
+    )
+  return (
+    <>
+      {screen}
+      <Tour />
+    </>
+  )
 }

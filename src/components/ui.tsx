@@ -15,6 +15,7 @@ const paths: Record<string, ReactNode> = {
   sliders: <path d="M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4" />,
   plus: <path d="M12 5v14M5 12h14" />,
   minus: <path d="M5 12h14" />,
+  sun: <path d="M12 16a4 4 0 100-8 4 4 0 000 8zM12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" />,
   moon: <path d="M19 14.5A7.5 7.5 0 019.5 5a7.5 7.5 0 109.5 9.5z" />,
   repeat: <path d="M17 3l3 3-3 3M4 12V9a3 3 0 013-3h13M7 21l-3-3 3-3M20 12v3a3 3 0 01-3 3H4" />,
   pencil: <path d="M14 5l5 5M4 20l4-1 11-11-4-4L4 15z" />,
@@ -67,6 +68,7 @@ export function IconButton({
   className = '',
   size = 20,
   disabled,
+  tour,
 }: {
   icon: string
   label: string
@@ -74,10 +76,12 @@ export function IconButton({
   className?: string
   size?: number
   disabled?: boolean
+  tour?: string
 }) {
   return (
     <button
       type="button"
+      data-tour={tour}
       aria-label={label}
       title={label}
       onClick={onClick}

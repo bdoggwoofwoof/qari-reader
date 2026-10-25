@@ -24,6 +24,8 @@ A personal replacement for Speechify: read PDFs and EPUBs aloud with word-by-wor
 - **School tools** – select text to highlight it or add a note; each highlight keeps the PDF’s printed page number. Notes panel per book with copy-all and a Markdown download, quotes formatted as “…” (Author, p. 45). Full-text search inside a book that ignores accents, Arabic vowel marks and alif/ya variants. Page markers between paragraphs (in the margin on wide screens); tap one to see the original PDF page for tables and figures.
 - **Sync** – books, reading position, saved words and settings follow you between devices. Turn it on from the cloud button, then scan the QR code on your other device. Everything is encrypted on the device (AES-GCM, key derived from the sync code) before upload; the server stores only ciphertext in a private Vercel Blob store via `api/sync.ts`. If you read further on another device, the open book offers to jump there.
 
+- **Tour** – on first launch a guided tour highlights each control in the library and, on a short sample, in the reader. Take it again from the bottom of the library. The library header also has a light/dark switch.
+
 Gestures: tap a word to look it up, double-tap it to read from there.
 Keyboard: Space = play/pause, ← / → = previous / next sentence, R = repeat sentence.
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { go } from '../App'
 import { deleteDoc, listDocs, saveDoc, saveFile, updateDocMeta } from '../lib/db'
 import { useSettings } from '../lib/settings'
+import { startTour, useTour } from '../lib/tour'
 import VoiceCheck from './VoiceCheck'
 import SyncSheet from './SyncSheet'
 import { useSyncStatus } from '../lib/sync'
@@ -82,14 +83,44 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
       return null
     }
   })
-  const [settings] = useSettings()
+  const [settings, updateSettings] = useSettings()
+  const dark = settings.theme === 'dark'
+  const toggleTheme = () => {
+    try {
+      if (!dark) localStorage.setItem('qari.lightTheme', settings.theme)
+    } catch {
+      /* storage unavailable */
+    }
+    let back: 'light' | 'sepia' = 'light'
+    try {
+      if (localStorage.getItem('qari.lightTheme') === 'sepia') back = 'sepia'
+    } catch {
+      /* storage unavailable */
+    }
+    updateSettings({ theme: dark ? back : 'dark' })
+  }
   const [addOpen, setAddOpen] = useState(false)
   const [syncOpen, setSyncOpen] = useState(!!joinCode)
-  const [voicesOpen, setVoicesOpen] = useState(!settings.voiceCheckDone && !joinCode)
+  const tour = useTour()
+  const firstRun = !settings.tourDone && !joinCode && !shared
+  const [voicesOpen, setVoicesOpen] = useState(!settings.voiceCheckDone && !joinCode && !firstRun && !tour.active)
   const sync = useSyncStatus()
   const input = useRef<HTMLInputElement>(null)
 
   const refresh = useCallback(() => listDocs().then(setDocs), [])
+
+  // First launch on a new device with nothing in it: show people around, then check voices.
+  useEffect(() => {
+    if (firstRun && docs && docs.length === 0 && !tour.active) {
+      updateSettings({ tourDone: true })
+      startTour()
+    }
+  }, [firstRun, docs, tour.active, updateSettings])
+  const wasTouring = useRef(tour.active)
+  useEffect(() => {
+    if (wasTouring.current && !tour.active && !settings.voiceCheckDone) setVoicesOpen(true)
+    wasTouring.current = tour.active
+  }, [tour.active, settings.voiceCheckDone])
   useEffect(() => {
     refresh()
     window.addEventListener('qari:synced', refresh)
@@ -296,10 +327,10 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
           <span className="font-arabic text-3xl leading-none text-moss" lang="ar">
             قارئ
           </span>
-          <h1 className="text-lg font-semibold tracking-tight">Qari</h1>
+          <h1 className="text-lg font-semibold tracking-tight max-[420px]:sr-only">Qari</h1>
         </div>
         <div className="flex items-center gap-1">
-          <span className="relative">
+          <span className="relative" data-tour="sync">
             <IconButton
               icon="cloud"
               label={sync.state === 'off' ? 'Sync between devices' : `Sync: ${sync.state === 'error' ? 'needs attention' : sync.state}`}
@@ -313,11 +344,13 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
               />
             )}
           </span>
-          <IconButton icon="speaker" label="Voices on this device" onClick={() => setVoicesOpen(true)} />
-          <IconButton icon="words" label="Saved words" onClick={() => go('words')} />
+          <IconButton icon={dark ? 'sun' : 'moon'} label={dark ? 'Light mode' : 'Dark mode'} onClick={toggleTheme} className="max-sm:w-10" tour="theme" />
+          <IconButton icon="speaker" label="Voices on this device" onClick={() => setVoicesOpen(true)} tour="voices" />
+          <IconButton icon="words" label="Saved words" onClick={() => go('words')} tour="words" />
           <button
             type="button"
             onClick={() => setAddOpen(true)}
+            data-tour="add"
             className="ml-1 inline-flex h-10 items-center gap-1.5 rounded-full bg-moss px-4 text-sm font-semibold text-moss-ink hover:opacity-90"
           >
             <Icon name="plus" size={18} /> Add
@@ -479,6 +512,13 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
           </ul>
         )}
         {docs && docs.length > 0 && <p className="mt-4 text-center text-sm text-ink-3">Drop PDFs, EPUBs, Word files or photos of pages anywhere here to add them.</p>}
+        {docs && (
+          <p className="mt-3 text-center text-sm">
+            <button type="button" onClick={startTour} className="text-moss underline underline-offset-2">
+              Take the tour
+            </button>
+          </p>
+        )}
       </main>
 
       <Sheet open={addOpen} onClose={() => setAddOpen(false)} title="Add to your library">

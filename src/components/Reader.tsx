@@ -1155,6 +1155,7 @@ export default function Reader({ id }: { id: string }) {
                 setSettingsOpen(true)
               }}
               className="h-11 min-w-14 rounded-full px-2 text-sm font-semibold tabular-nums text-ink-2 hover:bg-paper-2"
+              data-tour="speed"
               aria-label={`${LANG_NAMES[curLang] || curLang} speed ${fmtRate(curRate)}×, tap to change`}
             >
               {chapterLangs.length > 1 && <span className="mr-1 text-[0.7rem] font-semibold uppercase text-ink-3">{curLang}</span>}
@@ -1164,6 +1165,7 @@ export default function Reader({ id }: { id: string }) {
             <button
               type="button"
               onClick={toggle}
+              data-tour="play"
               aria-label={playing ? 'Pause' : 'Play'}
               className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-moss text-moss-ink hover:opacity-90"
             >
