@@ -4,7 +4,7 @@ import { getDoc, savePosition, updateDocMeta } from '../lib/db'
 import { detectLang, isMostlyArabic, sentences, words, type Span } from '../lib/lang'
 import { useSettings } from '../lib/settings'
 import { getVoices, onVoicesChanged, pickVoice, SentenceSpeaker, speechSupported, voicesFor } from '../lib/tts'
-import { LANG_NAMES, RTL_LANGS, type DocContent, type DocMeta, type Lang } from '../types'
+import { ARABIC_FONTS, LANG_NAMES, RTL_LANGS, type ArabicFont, type DocContent, type DocMeta, type Lang } from '../types'
 import LookupSheet, { type Picked } from './LookupSheet'
 import { Icon, IconButton, Sheet } from './ui'
 
@@ -638,6 +638,26 @@ export default function Reader({ id }: { id: string }) {
                 className={`h-11 rounded-xl border capitalize ${settings.theme === t ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
               >
                 {t}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="mb-6">
+          <h3 className="mb-2 font-semibold">Arabic font</h3>
+          <div className="grid grid-cols-3 gap-2">
+            {(Object.entries(ARABIC_FONTS) as [ArabicFont, (typeof ARABIC_FONTS)[ArabicFont]][]).map(([k, f]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => updateSettings({ arabicFont: k })}
+                aria-label={f.label}
+                className={`flex flex-col items-center rounded-xl border px-1 py-2 ${settings.arabicFont === k ? 'border-moss bg-wash' : 'border-line'}`}
+              >
+                <span lang="ar" dir="rtl" className="text-xl leading-tight" style={{ fontFamily: f.family }}>
+                  ثَبَتَ تُجّار
+                </span>
+                <span className={`mt-1 text-xs ${settings.arabicFont === k ? 'font-semibold' : 'text-ink-2'}`}>{f.label}</span>
               </button>
             ))}
           </div>

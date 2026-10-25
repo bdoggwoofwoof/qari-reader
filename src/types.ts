@@ -49,6 +49,15 @@ export interface Settings {
   fontSize: number
   theme: 'light' | 'sepia' | 'dark'
   autoScroll: boolean
+  arabicFont: ArabicFont
+}
+
+export type ArabicFont = 'readex' | 'noto-sans' | 'naskh'
+
+export const ARABIC_FONTS: Record<ArabicFont, { label: string; family: string; size: string; leading: string }> = {
+  readex: { label: 'Readex Pro', family: "'Readex Pro Variable'", size: '1.04em', leading: '1.95' },
+  'noto-sans': { label: 'Noto Sans', family: "'Noto Sans Arabic Variable'", size: '1.1em', leading: '1.95' },
+  naskh: { label: 'Naskh', family: "'Noto Naskh Arabic Variable'", size: '1.15em', leading: '2.05' },
 }
 
 export const LANG_NAMES: Record<string, string> = {

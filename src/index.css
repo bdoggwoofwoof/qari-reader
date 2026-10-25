@@ -12,9 +12,9 @@
   --color-wash: var(--wash);
   --color-mark: var(--mark);
   --color-danger: var(--danger);
-  --font-read: 'Literata', 'Noto Naskh Arabic', Georgia, serif;
-  --font-ui: 'Instrument Sans', 'Noto Naskh Arabic', system-ui, sans-serif;
-  --font-arabic: 'Noto Naskh Arabic', 'Literata', serif;
+  --font-read: 'Literata Variable', var(--arabic-face), Georgia, serif;
+  --font-ui: 'Instrument Sans Variable', var(--arabic-face), system-ui, sans-serif;
+  --font-arabic: var(--arabic-face), 'Literata Variable', sans-serif;
 }
 
 :root {
@@ -29,6 +29,9 @@
   --wash: #d7e4da;
   --mark: #f3c969;
   --danger: #a23b2a;
+  --arabic-face: 'Readex Pro Variable';
+  --arabic-size: 1.04em;
+  --arabic-leading: 1.95;
   color-scheme: light;
 }
 
@@ -98,8 +101,8 @@ body {
 }
 .prose-read [dir='rtl'] {
   font-family: var(--font-arabic);
-  line-height: 2;
-  font-size: 1.12em;
+  line-height: var(--arabic-leading);
+  font-size: var(--arabic-size);
 }
 
 .s {

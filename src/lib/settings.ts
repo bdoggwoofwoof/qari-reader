@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { Settings } from '../types'
 
 const KEY = 'qari.settings'
-const DEFAULTS: Settings = { rate: 1, voices: {}, fontSize: 19, theme: 'light', autoScroll: true }
+const DEFAULTS: Settings = { rate: 1, voices: {}, fontSize: 19, theme: 'light', autoScroll: true, arabicFont: 'readex' }
 
 function load(): Settings {
   try {
