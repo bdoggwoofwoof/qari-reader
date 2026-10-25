@@ -2,7 +2,20 @@ import { useCallback, useEffect, useState } from 'react'
 import type { Settings } from '../types'
 
 const KEY = 'qari.settings'
-const DEFAULTS: Settings = { rate: 1, voices: {}, fontSize: 19, theme: 'light', autoScroll: true, arabicFont: 'readex' }
+const DEFAULTS: Settings = {
+  rate: 1,
+  voices: {},
+  fontSize: 19,
+  theme: 'light',
+  autoScroll: true,
+  arabicFont: 'readex',
+  rates: {},
+  afterSentence: 'continue',
+  showHarakat: true,
+  skipCitations: true,
+  pronunciations: [],
+  voiceCheckDone: false,
+}
 
 function load(): Settings {
   try {
@@ -34,4 +47,8 @@ export function useSettings() {
     listeners.forEach((l) => l(current))
   }, [])
   return [s, update] as const
+}
+
+export function rateFor(s: Settings, lang: string) {
+  return s.rates[lang] ?? s.rate
 }

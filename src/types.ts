@@ -50,6 +50,17 @@ export interface Settings {
   theme: 'light' | 'sepia' | 'dark'
   autoScroll: boolean
   arabicFont: ArabicFont
+  rates: Record<Lang, number> // speed per language; falls back to rate
+  afterSentence: 'continue' | 'pause' | 'repeat'
+  showHarakat: boolean
+  skipCitations: boolean
+  pronunciations: Pronunciation[]
+  voiceCheckDone: boolean
+}
+
+export interface Pronunciation {
+  from: string
+  to: string
 }
 
 export type ArabicFont = 'readex' | 'noto-sans' | 'naskh'

@@ -67,7 +67,7 @@ export default function LookupSheet({
   const save = async () => {
     const def = result?.entries
       .slice(0, 3)
-      .map((e) => `${e.partOfSpeech}${e.word !== picked.word ? ` (${e.word})` : ''}: ${e.senses.slice(0, 2).map((s) => s.text).join('; ')}`)
+      .map((e) => `${e.language && e.language !== LANG_NAMES[lang] ? e.language.replace(/ Arabic$/, '') + ' ' : ''}${e.partOfSpeech}${e.word !== picked.word ? ` (${e.word})` : ''}: ${e.senses.slice(0, 2).map((s) => s.text).join('; ')}`)
       .join('\n')
     await saveWord({
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
@@ -143,6 +143,9 @@ export default function LookupSheet({
           result?.entries.slice(0, 5).map((e, i) => (
             <div key={i} className="mb-4">
               <div className="text-sm font-semibold text-moss">
+                {e.language && e.language !== LANG_NAMES[lang] && (
+                  <span className="mr-2 rounded-full bg-wash px-2 py-0.5 text-xs font-semibold text-ink">{e.language.replace(/ Arabic$/, '')}</span>
+                )}
                 {e.partOfSpeech}
                 {e.word !== picked.word && (
                   <span className="ml-2 font-normal text-ink-3" dir="auto">

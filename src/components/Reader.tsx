@@ -1,9 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { go } from '../App'
 import { getDoc, savePosition, updateDocMeta } from '../lib/db'
-import { detectLang, isMostlyArabic, sentences, words, type Span } from '../lib/lang'
-import { useSettings } from '../lib/settings'
-import { getVoices, onVoicesChanged, pickVoice, SentenceSpeaker, speechSupported, voicesFor } from '../lib/tts'
+import { detectLang, isMostlyArabic, sentences, stripArabicMarks, words, type Span } from '../lib/lang'
+import { rateFor, useSettings } from '../lib/settings'
+import { speechText } from '../lib/speechText'
+import { CHARS_PER_SEC, getVoices, SAMPLES, onVoicesChanged, pickVoice, SentenceSpeaker, speechSupported, speakWord, voicesFor } from '../lib/tts'
 import { ARABIC_FONTS, LANG_NAMES, RTL_LANGS, type ArabicFont, type DocContent, type DocMeta, type Lang } from '../types'
 import LookupSheet, { type Picked } from './LookupSheet'
 import { Icon, IconButton, Sheet } from './ui'
@@ -21,7 +22,24 @@ interface Highlight {
   word: number // start offset of current word inside the block, -1 for none
 }
 
-const RATES = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3]
+interface Pos {
+  chapter: number
+  block: number
+  sent: number
+}
+
+type Sleep = { kind: 'off' } | { kind: 'time'; until: number } | { kind: 'section'; chapter: number }
+
+const RATES = [0.75, 0.85, 1, 1.25, 1.5, 1.75, 2, 2.5, 3]
+const fmtRate = (r: number) => (Number.isInteger(r) ? r.toFixed(1) : String(Number(r.toFixed(2))))
+
+function fmtMinutes(sec: number) {
+  if (sec < 60) return 'under a minute'
+  const m = Math.round(sec / 60)
+  if (m < 60) return `${m} min`
+  const h = Math.floor(m / 60)
+  return `${h} h ${m % 60} min`
+}
 
 /** One paragraph, split into tappable words grouped by sentence. Re-renders only when its own highlight changes. */
 const Block = memo(function Block({
@@ -32,6 +50,7 @@ const Block = memo(function Block({
   activeSent,
   activeWord,
   pickedStart,
+  harakat,
 }: {
   text: string
   index: number
@@ -40,28 +59,31 @@ const Block = memo(function Block({
   activeSent: number
   activeWord: number
   pickedStart: number
+  harakat: boolean
 }) {
   const rtl = RTL_LANGS.has(info.lang)
+  // Vowel marks are hidden only on screen; the voice still reads the fully voweled text.
+  const show = (s: string) => (harakat || !rtl ? s : stripArabicMarks(s))
   const parts: React.ReactNode[] = []
   let cursor = 0
   let wi = 0
   info.sents.forEach((s, si) => {
-    if (s.start > cursor) parts.push(text.slice(cursor, s.start))
+    if (s.start > cursor) parts.push(show(text.slice(cursor, s.start)))
     const inner: React.ReactNode[] = []
     let c = s.start
     while (wi < info.words.length && info.words[wi].start < s.end) {
       const w = info.words[wi]
-      if (w.start > c) inner.push(text.slice(c, w.start))
+      if (w.start > c) inner.push(show(text.slice(c, w.start)))
       const cls = `w${w.start === activeWord && si === activeSent ? ' now' : ''}${w.start === pickedStart ? ' picked' : ''}`
       inner.push(
         <span key={w.start} className={cls} data-b={index} data-s={w.start} data-e={w.end}>
-          {text.slice(w.start, w.end)}
+          {show(text.slice(w.start, w.end))}
         </span>,
       )
       c = w.end
       wi++
     }
-    if (c < s.end) inner.push(text.slice(c, s.end))
+    if (c < s.end) inner.push(show(text.slice(c, s.end)))
     parts.push(
       <span key={'s' + si} className={`s${si === activeSent ? ' on' : ''}`} data-sb={index} data-si={si}>
         {inner}
@@ -69,7 +91,7 @@ const Block = memo(function Block({
     )
     cursor = s.end
   })
-  if (cursor < text.length) parts.push(text.slice(cursor))
+  if (cursor < text.length) parts.push(show(text.slice(cursor)))
   const Tag = heading ? 'h2' : 'p'
   return (
     <Tag className={heading ? 'h text-[1.35em]' : undefined} dir={rtl ? 'rtl' : 'auto'} lang={info.lang} data-block={index}>
@@ -77,6 +99,18 @@ const Block = memo(function Block({
     </Tag>
   )
 })
+
+function Toggle({ checked, onChange, title, hint }: { checked: boolean; onChange: (v: boolean) => void; title: string; hint: string }) {
+  return (
+    <label className="mb-5 flex items-center justify-between gap-4">
+      <span>
+        <span className="block font-semibold">{title}</span>
+        <span className="text-sm text-ink-3">{hint}</span>
+      </span>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-5 w-5 shrink-0 accent-[var(--moss)]" />
+    </label>
+  )
+}
 
 export default function Reader({ id }: { id: string }) {
   const [meta, setMeta] = useState<DocMeta | null>(null)
@@ -88,14 +122,23 @@ export default function Reader({ id }: { id: string }) {
   const [picked, setPicked] = useState<Picked | null>(null)
   const [tocOpen, setTocOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [sleepOpen, setSleepOpen] = useState(false)
+  const [sleep, setSleepState] = useState<Sleep>({ kind: 'off' })
+  const [now, setNow] = useState(Date.now())
+  const [away, setAway] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [voicesVersion, setVoicesVersion] = useState(0)
+  const [newFrom, setNewFrom] = useState('')
+  const [newTo, setNewTo] = useState('')
   const [settings, updateSettings] = useSettings()
 
   const speaker = useRef(new SentenceSpeaker())
-  const pos = useRef({ chapter: 0, block: 0, sent: 0 })
+  const pos = useRef<Pos>({ chapter: 0, block: 0, sent: 0 })
   const lastWord = useRef<number | null>(null)
   const playingRef = useRef(false)
+  const repeated = useRef(false)
+  const lastSpoken = useRef<Pos | null>(null)
+  const sleepRef = useRef<Sleep>({ kind: 'off' })
   const settingsRef = useRef(settings)
   settingsRef.current = settings
   const metaRef = useRef<DocMeta | null>(null)
@@ -105,8 +148,15 @@ export default function Reader({ id }: { id: string }) {
   const infoCache = useRef(new Map<string, BlockInfo>())
   const userScrolledAt = useRef(0)
   const saveTimer = useRef<number | null>(null)
+  const tapTimer = useRef<number | null>(null)
+  const lastTap = useRef<{ b: number; s: number; t: number } | null>(null)
   const wakeLock = useRef<{ release: () => Promise<void> } | null>(null)
   const warnedLangs = useRef(new Set<string>())
+
+  const setSleep = (s: Sleep) => {
+    sleepRef.current = s
+    setSleepState(s)
+  }
 
   // ---------- Load ----------
   useEffect(() => {
@@ -160,6 +210,17 @@ export default function Reader({ id }: { id: string }) {
     for (const i of blockInfos) set.add(i.lang)
     return [...set]
   }, [blockInfos, meta])
+  const hasArabic = chapterLangs.some((l) => RTL_LANGS.has(l))
+  const blockStarts = useMemo(() => {
+    const out: number[] = []
+    let n = 0
+    for (const t of chapterData?.blocks || []) {
+      out.push(n)
+      n += t.length
+    }
+    out.push(n)
+    return out
+  }, [chapterData])
 
   // ---------- Position saving ----------
   const persist = useCallback(() => {
@@ -191,6 +252,38 @@ export default function Reader({ id }: { id: string }) {
     }
   }
 
+  /** The sentence after (c, b, s), skipping empty paragraphs and crossing into the next section. */
+  const nextPos = useCallback(
+    (c: number, b: number, s: number): Pos | null => {
+      const doc = contentRef.current
+      if (!doc) return null
+      const info = infoFor(c, b)
+      if (info && s + 1 < info.sents.length) return { chapter: c, block: b, sent: s + 1 }
+      let nc = c
+      let nb = b + 1
+      while (nc < doc.chapters.length) {
+        while (nb < doc.chapters[nc].blocks.length) {
+          if (infoFor(nc, nb)?.sents.length) return { chapter: nc, block: nb, sent: 0 }
+          nb++
+        }
+        nc++
+        nb = 0
+      }
+      return null
+    },
+    [infoFor],
+  )
+
+  const stopAt = (p: Pos, msg?: string) => {
+    setPlayingState(false)
+    pos.current = p
+    lastWord.current = null
+    setChapter(p.chapter)
+    setHl({ ...p, word: -1 })
+    persist()
+    if (msg) setNotice(msg)
+  }
+
   const speakAt = useCallback(
     (c: number, b: number, s: number, fromOffset?: number): void => {
       const doc = contentRef.current
@@ -205,30 +298,37 @@ export default function Reader({ id }: { id: string }) {
         return
       }
       pos.current = { chapter: c, block: b, sent: s }
+      lastSpoken.current = { chapter: c, block: b, sent: s }
       const start = fromOffset !== undefined && fromOffset > span.start && fromOffset < span.end ? fromOffset : span.start
-      const text = doc.chapters[c].blocks[b].slice(start, span.end)
+      const st = settingsRef.current
+      const spoken = speechText(doc.chapters[c].blocks[b].slice(start, span.end), st)
       lastWord.current = start
       setChapter((prev) => (prev === c ? prev : c))
       setHl({ chapter: c, block: b, sent: s, word: -1 })
       persist()
-      const st = settingsRef.current
+      if (!/[\p{L}\p{N}]/u.test(spoken.text)) {
+        // Nothing left to say once citations are skipped.
+        advance(c, b, s)
+        return
+      }
       const voice = pickVoice(info.lang, st.voices[info.lang])
       if (!voice && !warnedLangs.current.has(info.lang)) {
         warnedLangs.current.add(info.lang)
         setNotice(`This device has no ${LANG_NAMES[info.lang] || info.lang} voice installed, so it may be read in the wrong accent or skipped. See Settings for how to add one.`)
       }
       speaker.current.speak({
-        text,
+        text: spoken.text,
         lang: info.lang,
         voice,
-        rate: st.rate,
+        rate: rateFor(st, info.lang),
         onWord: (ws) => {
-          lastWord.current = start + ws
-          setHl({ chapter: c, block: b, sent: s, word: start + ws })
+          const at = start + (spoken.map[ws] ?? ws)
+          lastWord.current = at
+          setHl({ chapter: c, block: b, sent: s, word: at })
         },
         onEnd: () => {
           lastWord.current = null
-          if (playingRef.current) advance(c, b, s)
+          if (playingRef.current) sentenceDone(c, b, s)
         },
         onError: (msg) => {
           setNotice(msg)
@@ -241,33 +341,43 @@ export default function Reader({ id }: { id: string }) {
 
   const advance = useCallback(
     (c: number, b: number, s: number): void => {
-      const doc = contentRef.current
-      if (!doc) return
-      const info = infoFor(c, b)
-      if (info && s + 1 < info.sents.length) {
-        speakAt(c, b, s + 1)
+      const next = nextPos(c, b, s)
+      if (!next) {
+        setPlayingState(false)
+        setHl((h) => ({ ...h, sent: -1, word: -1 }))
+        setNotice('You’ve reached the end.')
         return
       }
-      // Next paragraph with something to say, then the next chapter.
-      let nc = c
-      let nb = b + 1
-      while (nc < doc.chapters.length) {
-        while (nb < doc.chapters[nc].blocks.length) {
-          if (infoFor(nc, nb)?.sents.length) {
-            speakAt(nc, nb, 0)
-            return
-          }
-          nb++
-        }
-        nc++
-        nb = 0
+      const sl = sleepRef.current
+      if (sl.kind === 'section' && next.chapter !== sl.chapter) {
+        setSleep({ kind: 'off' })
+        return stopAt(next, 'Sleep timer: stopped at the end of the section.')
       }
-      setPlayingState(false)
-      setHl((h) => ({ ...h, sent: -1, word: -1 }))
-      setNotice('You’ve reached the end.')
+      speakAt(next.chapter, next.block, next.sent)
     },
-    [infoFor, speakAt],
+    [nextPos, speakAt],
   )
+
+  /** What happens when a sentence finishes: repeat it, pause, stop for the sleep timer, or go on. */
+  const sentenceDone = (c: number, b: number, s: number) => {
+    const st = settingsRef.current
+    if (st.afterSentence === 'repeat' && !repeated.current) {
+      repeated.current = true
+      speakAt(c, b, s)
+      return
+    }
+    repeated.current = false
+    const sl = sleepRef.current
+    if (sl.kind === 'time' && Date.now() >= sl.until) {
+      setSleep({ kind: 'off' })
+      return stopAt(nextPos(c, b, s) || { chapter: c, block: b, sent: s }, 'Sleep timer: playback stopped.')
+    }
+    if (st.afterSentence === 'pause') {
+      const next = nextPos(c, b, s)
+      if (next) return stopAt(next)
+    }
+    advance(c, b, s)
+  }
 
   const play = useCallback(() => {
     if (!speechSupported()) {
@@ -275,6 +385,7 @@ export default function Reader({ id }: { id: string }) {
       return
     }
     setPlayingState(true)
+    repeated.current = false
     const p = pos.current
     const info = infoFor(p.chapter, p.block)
     if (!info?.sents.length) return advance(p.chapter, p.block, 0)
@@ -288,26 +399,26 @@ export default function Reader({ id }: { id: string }) {
 
   const toggle = useCallback(() => (playingRef.current ? pause() : play()), [pause, play])
 
+  const repeatSentence = useCallback(() => {
+    lastWord.current = null
+    repeated.current = true // don't double up when "repeat once" is on
+    userScrolledAt.current = 0
+    // While playing, replay the current sentence; when stopped, replay the one just heard.
+    const p = (!playingRef.current && lastSpoken.current) || pos.current
+    setPlayingState(true)
+    speakAt(p.chapter, p.block, Math.max(0, p.sent))
+  }, [speakAt])
+
   const step = useCallback(
     (dir: 1 | -1) => {
       const doc = contentRef.current
       if (!doc) return
       let { chapter: c, block: b, sent: s } = pos.current
       lastWord.current = null
+      repeated.current = false
       if (dir === 1) {
-        const info = infoFor(c, b)
-        if (info && s + 1 < info.sents.length) s++
-        else {
-          const nextB = doc.chapters[c].blocks.findIndex((_, i) => i > b && (infoFor(c, i)?.sents.length ?? 0) > 0)
-          if (nextB >= 0) {
-            b = nextB
-            s = 0
-          } else if (c + 1 < doc.chapters.length) {
-            c++
-            b = 0
-            s = 0
-          }
-        }
+        const next = nextPos(c, b, s)
+        if (next) ({ chapter: c, block: b, sent: s } = next)
       } else {
         if (s > 0) s--
         else {
@@ -328,50 +439,99 @@ export default function Reader({ id }: { id: string }) {
         persist()
       }
     },
-    [infoFor, persist, speakAt],
+    [infoFor, nextPos, persist, speakAt],
   )
 
-  // Restart the current sentence from the current word when speed or voice changes mid-playback.
-  const rateKey = settings.rate + JSON.stringify(settings.voices)
-  const firstRate = useRef(true)
+  const jumpTo = useCallback(
+    (b: number, at?: number) => {
+      const info = infoFor(chapter, b)
+      if (!info?.sents.length) return
+      const si = at === undefined ? 0 : Math.max(0, info.sents.findIndex((s) => at >= s.start && at < s.end))
+      pos.current = { chapter, block: b, sent: si }
+      lastWord.current = at ?? null
+      repeated.current = false
+      userScrolledAt.current = 0
+      if (playingRef.current || at !== undefined) play()
+      else {
+        setHl({ chapter, block: b, sent: si, word: -1 })
+        persist()
+      }
+    },
+    [chapter, infoFor, persist, play],
+  )
+
+  // Restart the current sentence from the current word when speed, voice or speech rules change mid-playback.
+  const restartKey = JSON.stringify([settings.rate, settings.rates, settings.voices, settings.skipCitations, settings.pronunciations])
+  const firstRestart = useRef(true)
   useEffect(() => {
-    if (firstRate.current) {
-      firstRate.current = false
+    if (firstRestart.current) {
+      firstRestart.current = false
       return
     }
     if (playingRef.current) {
       const p = pos.current
       speakAt(p.chapter, p.block, p.sent, lastWord.current ?? undefined)
     }
-  }, [rateKey, speakAt])
+  }, [restartKey, speakAt])
 
-  // ---------- Auto-scroll ----------
+  // ---------- Sleep timer clock ----------
+  useEffect(() => {
+    if (sleep.kind !== 'time') return
+    const t = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [sleep.kind])
+
+  // ---------- Auto-scroll and "Back to reading" ----------
+  const activeEl = () => document.querySelector(`[data-sb="${hl.block}"][data-si="${hl.sent}"]`)
+  const scrollToActive = (smooth = true) => {
+    const el = activeEl()
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    window.scrollTo({ top: window.scrollY + r.top - window.innerHeight * 0.33, behavior: smooth ? 'smooth' : 'auto' })
+  }
+
   useEffect(() => {
     if (hl.sent < 0 || hl.chapter !== chapter || !settings.autoScroll) return
     if (Date.now() - userScrolledAt.current < 5000) return
-    const el = document.querySelector(`[data-sb="${hl.block}"][data-si="${hl.sent}"]`)
+    const el = activeEl()
     if (!el) return
     const r = el.getBoundingClientRect()
-    const vh = window.innerHeight
-    if (r.top < 90 || r.bottom > vh - 150) {
-      window.scrollTo({ top: window.scrollY + r.top - vh * 0.33, behavior: 'smooth' })
-    }
+    if (r.top < 90 || r.bottom > window.innerHeight - 190) scrollToActive()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hl.block, hl.sent, hl.chapter, chapter, settings.autoScroll])
 
   useEffect(() => {
+    const check = () => {
+      const el = hl.sent >= 0 && hl.chapter === chapter ? activeEl() : null
+      if (!el) return setAway(hl.chapter !== chapter && hl.sent >= 0)
+      const r = el.getBoundingClientRect()
+      setAway(r.bottom < 70 || r.top > window.innerHeight - 170)
+    }
+    check()
     const mark = () => (userScrolledAt.current = Date.now())
+    window.addEventListener('scroll', check, { passive: true })
     window.addEventListener('wheel', mark, { passive: true })
     window.addEventListener('touchmove', mark, { passive: true })
     return () => {
+      window.removeEventListener('scroll', check)
       window.removeEventListener('wheel', mark)
       window.removeEventListener('touchmove', mark)
     }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hl.block, hl.sent, hl.chapter, chapter])
+
+  const backToReading = () => {
+    userScrolledAt.current = 0
+    if (hl.chapter !== chapter) {
+      setChapter(hl.chapter)
+      requestAnimationFrame(() => scrollToActive(false))
+    } else scrollToActive()
+  }
 
   // ---------- Keyboard & lock-screen controls ----------
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
-      if (picked || tocOpen || settingsOpen) return
+      if (picked || tocOpen || settingsOpen || sleepOpen) return
       const t = e.target as HTMLElement
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return
       if (e.code === 'Space') {
@@ -379,10 +539,11 @@ export default function Reader({ id }: { id: string }) {
         toggle()
       } else if (e.key === 'ArrowRight') step(1)
       else if (e.key === 'ArrowLeft') step(-1)
+      else if (e.key === 'r') repeatSentence()
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [toggle, step, picked, tocOpen, settingsOpen])
+  }, [toggle, step, repeatSentence, picked, tocOpen, settingsOpen, sleepOpen])
 
   useEffect(() => {
     if (!('mediaSession' in navigator) || !meta) return
@@ -393,29 +554,36 @@ export default function Reader({ id }: { id: string }) {
     navigator.mediaSession.setActionHandler('previoustrack', () => step(-1))
   }, [meta, play, pause, step])
 
-  // ---------- Tap a word ----------
+  // ---------- Tap a word: once to look it up, twice to read from there ----------
   const onTextClick = (e: MouseEvent) => {
     const el = (e.target as HTMLElement).closest('.w') as HTMLElement | null
     if (!el || !content) return
     const b = Number(el.dataset.b)
     const start = Number(el.dataset.s)
-    const info = infoFor(chapter, b)
-    if (!info) return
-    if (playingRef.current) pause()
-    const text = content.chapters[chapter].blocks[b]
-    const sent = info.sents.find((s) => start >= s.start && start < s.end) || { start: 0, end: text.length }
-    setPicked({ word: el.textContent || '', lang: info.lang, sentence: text.slice(sent.start, sent.end).trim(), block: b, start })
+    const t = Date.now()
+    const prev = lastTap.current
+    if (prev && prev.b === b && prev.s === start && t - prev.t < 320) {
+      if (tapTimer.current) clearTimeout(tapTimer.current)
+      lastTap.current = null
+      window.getSelection()?.removeAllRanges()
+      jumpTo(b, start)
+      return
+    }
+    lastTap.current = { b, s: start, t }
+    if (tapTimer.current) clearTimeout(tapTimer.current)
+    tapTimer.current = window.setTimeout(() => {
+      const info = infoFor(chapter, b)
+      if (!info) return
+      if (playingRef.current) pause()
+      const text = content.chapters[chapter].blocks[b]
+      const sent = info.sents.find((s) => start >= s.start && start < s.end) || { start: 0, end: text.length }
+      setPicked({ word: text.slice(start, Number(el.dataset.e)), lang: info.lang, sentence: text.slice(sent.start, sent.end).trim(), block: b, start })
+    }, 300)
   }
 
   const readFromHere = (p: Picked) => {
     setPicked(null)
-    const info = infoFor(chapter, p.block)
-    if (!info) return
-    const si = Math.max(0, info.sents.findIndex((s) => p.start >= s.start && p.start < s.end))
-    pos.current = { chapter, block: p.block, sent: si }
-    lastWord.current = p.start
-    userScrolledAt.current = 0
-    play()
+    jumpTo(p.block, p.start)
   }
 
   const goChapter = (c: number) => {
@@ -456,6 +624,42 @@ export default function Reader({ id }: { id: string }) {
   }
   const isLast = chapter >= content.chapters.length - 1
 
+  // Progress and time left in this section, at the current speed.
+  const curLang = (hl.chapter === chapter ? blockInfos[hl.block]?.lang : undefined) || meta.lang
+  const curRate = rateFor(settings, curLang)
+  const atBlock = hl.chapter === chapter ? hl.block : 0
+  const atChar = blockStarts[atBlock] + (hl.chapter === chapter && hl.sent >= 0 ? (blockInfos[atBlock]?.sents[hl.sent]?.start ?? 0) : 0)
+  const total = blockStarts[blockStarts.length - 1] || 1
+  const fraction = Math.min(1, atChar / total)
+  const secsLeft = (total - atChar) / ((CHARS_PER_SEC[meta.lang] || 14) * rateFor(settings, meta.lang))
+  const sleepLabel =
+    sleep.kind === 'time'
+      ? (() => {
+          const s = Math.max(0, Math.round((sleep.until - now) / 1000))
+          return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+        })()
+      : sleep.kind === 'section'
+        ? 'End of section'
+        : null
+
+  const seek = (e: MouseEvent<HTMLDivElement>) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    const f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
+    const target = f * total
+    let b = blockStarts.findIndex((n, i) => n <= target && blockStarts[i + 1] > target)
+    if (b < 0) b = blockInfos.length - 1
+    while (b < blockInfos.length - 1 && !blockInfos[b]?.sents.length) b++
+    pos.current = { chapter, block: b, sent: 0 }
+    lastWord.current = null
+    userScrolledAt.current = 0
+    if (playingRef.current) speakAt(chapter, b, 0)
+    else {
+      setHl({ chapter, block: b, sent: 0, word: -1 })
+      persist()
+      requestAnimationFrame(() => document.querySelector(`[data-block="${b}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }))
+    }
+  }
+
   return (
     <div className="min-h-full">
       <header className="sticky top-0 z-30 border-b border-line/70 bg-paper/90 pt-[env(safe-area-inset-top)] backdrop-blur">
@@ -470,6 +674,7 @@ export default function Reader({ id }: { id: string }) {
             </div>
           </button>
           <IconButton icon="list" label="Contents" onClick={() => setTocOpen(true)} />
+          <IconButton icon="words" label="Saved words" onClick={() => go('words')} />
           <IconButton icon="sliders" label="Reading settings" onClick={() => setSettingsOpen(true)} />
         </div>
       </header>
@@ -483,11 +688,7 @@ export default function Reader({ id }: { id: string }) {
         </div>
       )}
 
-      <main
-        className="prose-read mx-auto max-w-[38rem] px-5 pt-6 pb-44"
-        style={{ fontSize: settings.fontSize }}
-        onClick={onTextClick}
-      >
+      <main className="prose-read mx-auto max-w-[38rem] px-5 pt-6 pb-56" style={{ fontSize: settings.fontSize }} onClick={onTextClick}>
         {chapterData.blocks.map((text, b) => (
           <Block
             key={b}
@@ -498,6 +699,7 @@ export default function Reader({ id }: { id: string }) {
             activeSent={hl.chapter === chapter && hl.block === b ? hl.sent : -1}
             activeWord={hl.chapter === chapter && hl.block === b ? hl.word : -1}
             pickedStart={picked && picked.block === b ? picked.start : -1}
+            harakat={settings.showHarakat}
           />
         ))}
         <div className="mt-12 flex justify-between gap-3 font-ui text-sm">
@@ -512,33 +714,79 @@ export default function Reader({ id }: { id: string }) {
 
       {/* Player */}
       <div className="safe-b fixed inset-x-0 bottom-0 z-30 px-3 pt-2">
-        <div className="mx-auto flex max-w-md items-center justify-between gap-1 rounded-full border border-line bg-paper/95 p-1.5 shadow-[0_6px_30px_rgb(0_0_0/0.10)] backdrop-blur">
-          <button
-            type="button"
-            onClick={() => {
-              const i = RATES.findIndex((r) => r >= settings.rate - 0.01)
-              updateSettings({ rate: RATES[(i + 1) % RATES.length] })
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              setSettingsOpen(true)
-            }}
-            className="h-11 min-w-14 rounded-full px-2 text-sm font-semibold tabular-nums text-ink-2 hover:bg-paper-2"
-            aria-label={`Speed ${settings.rate}×, tap to change`}
+        {away && (
+          <div className="mb-2 flex justify-center">
+            <button
+              type="button"
+              onClick={backToReading}
+              className="sheet-in inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-paper px-4 text-sm font-semibold text-moss shadow-[0_4px_18px_rgb(0_0_0/0.10)]"
+            >
+              <Icon name="read" size={16} /> Back to reading
+            </button>
+          </div>
+        )}
+        <div className="mx-auto max-w-md rounded-[28px] border border-line bg-paper/95 px-2 pt-2 pb-1.5 shadow-[0_6px_30px_rgb(0_0_0/0.10)] backdrop-blur">
+          <div className="flex items-center justify-between gap-3 px-3 text-xs text-ink-3">
+            <span className="tabular-nums" aria-live="off">
+              {fmtMinutes(secsLeft)} left in section
+            </span>
+            <button
+              type="button"
+              onClick={() => setSleepOpen(true)}
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 tabular-nums ${sleepLabel ? 'bg-wash font-semibold text-ink' : 'hover:bg-paper-2'}`}
+              aria-label={sleepLabel ? `Sleep timer: ${sleepLabel}` : 'Sleep timer'}
+            >
+              <Icon name="moon" size={14} /> {sleepLabel || 'Sleep'}
+            </button>
+          </div>
+          <div
+            className="group mx-3 mt-1.5 mb-1 cursor-pointer py-1.5"
+            onClick={seek}
+            role="slider"
+            aria-label="Position in section"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(fraction * 100)}
+            tabIndex={-1}
           >
-            {Number.isInteger(settings.rate) ? settings.rate.toFixed(1) : String(Number(settings.rate.toFixed(2)))}×
-          </button>
-          <IconButton icon="prev" label="Previous sentence" onClick={() => step(-1)} />
-          <button
-            type="button"
-            onClick={toggle}
-            aria-label={playing ? 'Pause' : 'Play'}
-            className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-moss text-moss-ink hover:opacity-90"
-          >
-            <Icon name={playing ? 'pause' : 'play'} size={26} />
-          </button>
-          <IconButton icon="next" label="Next sentence" onClick={() => step(1)} />
-          <IconButton icon="words" label="Saved words" onClick={() => go('words')} />
+            <div className="h-1 overflow-hidden rounded-full bg-line group-hover:h-1.5">
+              <div className="h-full rounded-full bg-moss" style={{ width: `${fraction * 100}%` }} />
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                const i = RATES.findIndex((r) => r >= curRate - 0.01)
+                updateSettings({ rates: { ...settings.rates, [curLang]: RATES[(i + 1) % RATES.length] } })
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                setSettingsOpen(true)
+              }}
+              className="h-11 min-w-14 rounded-full px-2 text-sm font-semibold tabular-nums text-ink-2 hover:bg-paper-2"
+              aria-label={`${LANG_NAMES[curLang] || curLang} speed ${fmtRate(curRate)}×, tap to change`}
+            >
+              {chapterLangs.length > 1 && <span className="mr-1 text-[0.7rem] font-semibold uppercase text-ink-3">{curLang}</span>}
+              {fmtRate(curRate)}×
+            </button>
+            <IconButton icon="prev" label="Previous sentence" onClick={() => step(-1)} />
+            <button
+              type="button"
+              onClick={toggle}
+              aria-label={playing ? 'Pause' : 'Play'}
+              className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-moss text-moss-ink hover:opacity-90"
+            >
+              <Icon name={playing ? 'pause' : 'play'} size={26} />
+            </button>
+            <IconButton icon="next" label="Next sentence" onClick={() => step(1)} />
+            <IconButton
+              icon="repeat"
+              label="Repeat this sentence"
+              onClick={repeatSentence}
+              className={settings.afterSentence !== 'continue' ? 'text-moss' : ''}
+            />
+          </div>
         </div>
       </div>
 
@@ -559,14 +807,97 @@ export default function Reader({ id }: { id: string }) {
         </ol>
       </Sheet>
 
+      <Sheet open={sleepOpen} onClose={() => setSleepOpen(false)} title="Sleep timer">
+        <div className="grid grid-cols-2 gap-2 pb-2">
+          {[15, 30, 45, 60].map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => {
+                setSleep({ kind: 'time', until: Date.now() + m * 60000 })
+                setNow(Date.now())
+                setSleepOpen(false)
+              }}
+              className="h-12 rounded-xl border border-line hover:bg-paper-2"
+            >
+              {m} minutes
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              setSleep({ kind: 'section', chapter: hl.chapter })
+              setSleepOpen(false)
+            }}
+            className={`h-12 rounded-xl border hover:bg-paper-2 ${sleep.kind === 'section' ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
+          >
+            End of section
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSleep({ kind: 'off' })
+              setSleepOpen(false)
+            }}
+            className={`h-12 rounded-xl border hover:bg-paper-2 ${sleep.kind === 'off' ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
+          >
+            Off
+          </button>
+        </div>
+        <p className="pb-2 text-sm text-ink-3">Playback stops at the end of the sentence when the time is up.</p>
+      </Sheet>
+
       <Sheet open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Reading settings" wide>
         <section className="mb-6">
-          <div className="mb-2 flex items-baseline justify-between">
-            <h3 className="font-semibold">Speed</h3>
-            <span className="tabular-nums text-ink-2">{settings.rate.toFixed(2)}×</span>
+          <h3 className="mb-1 font-semibold">Speed</h3>
+          <p className="mb-3 text-sm text-ink-3">Each language keeps its own speed.</p>
+          {chapterLangs.map((lang) => {
+            const r = rateFor(settings, lang)
+            return (
+              <div key={lang} className="mb-3">
+                <div className="mb-1 flex items-baseline justify-between text-sm">
+                  <label htmlFor={'r-' + lang} className="text-ink-2">
+                    {LANG_NAMES[lang] || lang}
+                  </label>
+                  <span className="tabular-nums text-ink-2">{r.toFixed(2)}×</span>
+                </div>
+                <input
+                  id={'r-' + lang}
+                  type="range"
+                  min={0.5}
+                  max={3}
+                  step={0.05}
+                  value={r}
+                  onChange={(e) => updateSettings({ rates: { ...settings.rates, [lang]: Number(e.target.value) } })}
+                  className="w-full"
+                />
+              </div>
+            )
+          })}
+          <p className="text-xs text-ink-3">Some device voices top out around 2×; going higher won’t speed them up further.</p>
+        </section>
+
+        <section className="mb-6">
+          <h3 className="mb-1 font-semibold">After each sentence</h3>
+          <p className="mb-2 text-sm text-ink-3">For listening practice and shadowing. The repeat button replays a sentence any time.</p>
+          <div className="grid grid-cols-3 gap-2">
+            {(
+              [
+                ['continue', 'Keep going'],
+                ['pause', 'Pause'],
+                ['repeat', 'Repeat once'],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => updateSettings({ afterSentence: k })}
+                className={`h-11 rounded-xl border text-sm ${settings.afterSentence === k ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          <input type="range" min={0.5} max={3} step={0.05} value={settings.rate} onChange={(e) => updateSettings({ rate: Number(e.target.value) })} className="w-full" aria-label="Speed" />
-          <p className="mt-1 text-xs text-ink-3">Some device voices top out around 2×; going higher won’t speed them up further.</p>
         </section>
 
         <section className="mb-6">
@@ -580,18 +911,21 @@ export default function Reader({ id }: { id: string }) {
                   {LANG_NAMES[lang] || lang}
                 </label>
                 {list.length ? (
-                  <select
-                    id={'v-' + lang}
-                    value={chosen?.voiceURI}
-                    onChange={(e) => updateSettings({ voices: { ...settings.voices, [lang]: e.target.value } })}
-                    className="h-11 w-full rounded-xl border border-line bg-paper-2 px-3"
-                  >
-                    {list.map((v) => (
-                      <option key={v.voiceURI} value={v.voiceURI}>
-                        {v.name} ({v.lang}){v.localService ? '' : ' · online'}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex gap-2">
+                    <select
+                      id={'v-' + lang}
+                      value={chosen?.voiceURI}
+                      onChange={(e) => updateSettings({ voices: { ...settings.voices, [lang]: e.target.value } })}
+                      className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-paper-2 px-3"
+                    >
+                      {list.map((v) => (
+                        <option key={v.voiceURI} value={v.voiceURI}>
+                          {v.name} ({v.lang}){v.localService ? '' : ' · online'}
+                        </option>
+                      ))}
+                    </select>
+                    <IconButton icon="speaker" label={`Hear the ${LANG_NAMES[lang] || lang} voice`} onClick={() => speakWord(SAMPLES[lang] || SAMPLES.en, lang, chosen?.voiceURI, rateFor(settings, lang))} className="border border-line" />
+                  </div>
                 ) : (
                   <p className="rounded-xl bg-paper-2 px-3 py-2 text-sm text-ink-2">
                     No {LANG_NAMES[lang] || lang} voice on this device. On iPhone: Settings › Accessibility › Spoken Content › Voices. On Android: Settings › Text-to-speech ›
@@ -602,6 +936,52 @@ export default function Reader({ id }: { id: string }) {
             )
           })}
           <p className="text-xs text-ink-3">Voices marked “online” need an internet connection. Voices with “Natural”, “Enhanced” or “Premium” in the name sound best.</p>
+        </section>
+
+        <Toggle
+          checked={settings.skipCitations}
+          onChange={(v) => updateSettings({ skipCitations: v })}
+          title="Skip citations and links"
+          hint="Don’t read “(Smith, 2019)”, “[12]” or web addresses aloud. They stay on the page."
+        />
+
+        <section className="mb-6">
+          <h3 className="mb-1 font-semibold">Pronunciations</h3>
+          <p className="mb-2 text-sm text-ink-3">Teach the voice names and terms it gets wrong. Applies to every book.</p>
+          {settings.pronunciations.length > 0 && (
+            <ul className="mb-2 divide-y divide-line rounded-xl border border-line">
+              {settings.pronunciations.map((p, i) => (
+                <li key={i} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+                  <span className="min-w-0 flex-1 truncate" dir="auto">
+                    <span className="font-semibold">{p.from}</span> <span className="text-ink-3">says</span> {p.to}
+                  </span>
+                  <IconButton icon="speaker" label={`Hear ${p.from}`} size={17} onClick={() => speakWord(p.to, meta.lang, settings.voices[meta.lang])} />
+                  <IconButton
+                    icon="trash"
+                    label={`Remove ${p.from}`}
+                    size={17}
+                    onClick={() => updateSettings({ pronunciations: settings.pronunciations.filter((_, j) => j !== i) })}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (!newFrom.trim() || !newTo.trim()) return
+              updateSettings({ pronunciations: [...settings.pronunciations, { from: newFrom.trim(), to: newTo.trim() }] })
+              setNewFrom('')
+              setNewTo('')
+            }}
+          >
+            <input value={newFrom} onChange={(e) => setNewFrom(e.target.value)} placeholder="Word" dir="auto" aria-label="Word as written" className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-paper-2 px-3" />
+            <input value={newTo} onChange={(e) => setNewTo(e.target.value)} placeholder="Say it as" dir="auto" aria-label="Say it as" className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-paper-2 px-3" />
+            <button type="submit" disabled={!newFrom.trim() || !newTo.trim()} className="h-11 rounded-xl bg-moss px-4 font-semibold text-moss-ink disabled:opacity-40">
+              Add
+            </button>
+          </form>
         </section>
 
         <section className="mb-6">
@@ -644,8 +1024,8 @@ export default function Reader({ id }: { id: string }) {
         </section>
 
         <section className="mb-6">
-          <h3 className="mb-2 font-semibold">Arabic font</h3>
-          <div className="grid grid-cols-3 gap-2">
+          <h3 className="mb-2 font-semibold">Arabic</h3>
+          <div className="mb-4 grid grid-cols-3 gap-2">
             {(Object.entries(ARABIC_FONTS) as [ArabicFont, (typeof ARABIC_FONTS)[ArabicFont]][]).map(([k, f]) => (
               <button
                 key={k}
@@ -655,21 +1035,27 @@ export default function Reader({ id }: { id: string }) {
                 className={`flex flex-col items-center rounded-xl border px-1 py-2 ${settings.arabicFont === k ? 'border-moss bg-wash' : 'border-line'}`}
               >
                 <span lang="ar" dir="rtl" className="text-xl leading-tight" style={{ fontFamily: f.family }}>
-                  ثَبَتَ تُجّار
+                  {settings.showHarakat ? 'ثَبَتَ تُجّار' : 'ثبت تجار'}
                 </span>
                 <span className={`mt-1 text-xs ${settings.arabicFont === k ? 'font-semibold' : 'text-ink-2'}`}>{f.label}</span>
               </button>
             ))}
           </div>
+          <Toggle
+            checked={settings.showHarakat}
+            onChange={(v) => updateSettings({ showHarakat: v })}
+            title="Show vowel marks"
+            hint={hasArabic ? 'Turn off to practise reading unvoweled text. The voice still reads it fully voweled.' : 'Applies to Arabic text.'}
+          />
         </section>
 
-        <label className="flex items-center justify-between gap-4 pb-2">
-          <span>
-            <span className="block font-semibold">Follow along</span>
-            <span className="text-sm text-ink-3">Scroll to keep the spoken sentence in view.</span>
-          </span>
-          <input type="checkbox" checked={settings.autoScroll} onChange={(e) => updateSettings({ autoScroll: e.target.checked })} className="h-5 w-5 accent-[var(--moss)]" />
-        </label>
+        <Toggle
+          checked={settings.autoScroll}
+          onChange={(v) => updateSettings({ autoScroll: v })}
+          title="Follow along"
+          hint="Scroll to keep the spoken sentence in view."
+        />
+        <p className="pb-2 text-xs text-ink-3">Tip: tap a word to look it up, double-tap it to start reading from there.</p>
       </Sheet>
 
       <LookupSheet
@@ -682,3 +1068,4 @@ export default function Reader({ id }: { id: string }) {
     </div>
   )
 }
+

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { go } from '../App'
-import { deleteDoc, listDocs, saveDoc } from '../lib/db'
+import { deleteDoc, listDocs, saveDoc, updateDocMeta } from '../lib/db'
+import { useSettings } from '../lib/settings'
+import VoiceCheck from './VoiceCheck'
 import { importFile, importText } from '../lib/importer'
 import { LANG_NAMES, type DocMeta } from '../types'
 import { Icon, IconButton, Sheet } from './ui'
@@ -28,6 +30,11 @@ export default function Library() {
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
   const [dragging, setDragging] = useState(false)
+  const [query, setQuery] = useState('')
+  const [renaming, setRenaming] = useState<DocMeta | null>(null)
+  const [newTitle, setNewTitle] = useState('')
+  const [settings] = useSettings()
+  const [voicesOpen, setVoicesOpen] = useState(!settings.voiceCheckDone)
   const input = useRef<HTMLInputElement>(null)
 
   const refresh = useCallback(() => listDocs().then(setDocs), [])
@@ -69,7 +76,16 @@ export default function Library() {
     refresh()
   }
 
+  const saveTitle = async () => {
+    if (!renaming || !newTitle.trim()) return
+    await updateDocMeta(renaming.id, { title: newTitle.trim() })
+    setRenaming(null)
+    refresh()
+  }
+
   const empty = docs !== null && docs.length === 0
+  const q = query.trim().toLocaleLowerCase()
+  const shown = (docs || []).filter((d) => !q || d.title.toLocaleLowerCase().includes(q) || (d.author || '').toLocaleLowerCase().includes(q))
 
   return (
     <div
@@ -93,6 +109,7 @@ export default function Library() {
           <h1 className="text-lg font-semibold tracking-tight">Qari</h1>
         </div>
         <div className="flex items-center gap-1">
+          <IconButton icon="speaker" label="Voices on this device" onClick={() => setVoicesOpen(true)} />
           <IconButton icon="words" label="Saved words" onClick={() => go('words')} />
           <IconButton icon="paste" label="Paste text" onClick={() => setPasteOpen(true)} />
           <button
@@ -151,9 +168,29 @@ export default function Library() {
           </button>
         )}
 
-        {docs && docs.length > 0 && (
+        {docs && docs.length > 2 && (
+          <label className="mt-4 flex h-11 items-center gap-2 rounded-full border border-line bg-paper-2 px-4 focus-within:border-moss">
+            <Icon name="search" size={18} className="text-ink-3" />
+            <span className="sr-only">Search your library</span>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search titles and authors"
+              dir="auto"
+              className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-ink-3"
+            />
+            {query && (
+              <button type="button" onClick={() => setQuery('')} className="text-sm text-ink-3 underline">
+                Clear
+              </button>
+            )}
+          </label>
+        )}
+        {docs && docs.length > 0 && q && shown.length === 0 && <p className="mt-6 text-center text-ink-2">Nothing in your library matches “{query}”.</p>}
+
+        {shown.length > 0 && (
           <ul className="mt-4 divide-y divide-line border-y border-line">
-            {docs.map((d) => {
+            {shown.map((d) => {
               const p = progress(d)
               return (
                 <li key={d.id} className="group relative flex items-center gap-2">
@@ -171,7 +208,16 @@ export default function Library() {
                       <div className="h-full bg-moss" style={{ width: `${Math.max(p * 100, 1.5)}%` }} />
                     </div>
                   </a>
-                  <IconButton icon="trash" label={`Remove ${d.title}`} onClick={() => remove(d)} className="opacity-60 group-hover:opacity-100" />
+                  <IconButton
+                    icon="pencil"
+                    label={`Rename ${d.title}`}
+                    onClick={() => {
+                      setRenaming(d)
+                      setNewTitle(d.title)
+                    }}
+                    className="opacity-60 group-hover:opacity-100"
+                  />
+                  <IconButton icon="trash" label={`Remove ${d.title}`} onClick={() => remove(d)} className="-ml-2 opacity-60 group-hover:opacity-100" />
                 </li>
               )
             })}
@@ -179,6 +225,29 @@ export default function Library() {
         )}
         {docs && docs.length > 0 && <p className="mt-4 text-center text-sm text-ink-3">Drop PDFs or EPUBs anywhere on this page to add them.</p>}
       </main>
+
+      <VoiceCheck open={voicesOpen} onClose={() => setVoicesOpen(false)} />
+
+      <Sheet open={!!renaming} onClose={() => setRenaming(null)} title="Rename">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            saveTitle()
+          }}
+        >
+          <input
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            dir="auto"
+            autoFocus
+            aria-label="Title"
+            className="h-12 w-full rounded-xl border border-line bg-paper-2 px-3 font-read text-lg outline-none focus:border-moss"
+          />
+          <button type="submit" disabled={!newTitle.trim()} className="mt-3 mb-2 h-11 w-full rounded-full bg-moss font-semibold text-moss-ink disabled:opacity-40">
+            Save title
+          </button>
+        </form>
+      </Sheet>
 
       <Sheet open={pasteOpen} onClose={() => setPasteOpen(false)} title="Paste text" wide>
         <textarea

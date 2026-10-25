@@ -84,7 +84,17 @@ export interface SpeakOptions {
 /** Remembers which voices report word timing, so the estimate can kick in at once for the others. */
 const boundaryVoices = new Map<string, boolean>()
 
-const CHARS_PER_SEC: Record<string, number> = { en: 15, ar: 12, fr: 15, de: 14, es: 15 }
+export const CHARS_PER_SEC: Record<string, number> = { en: 15, ar: 12, fr: 15, de: 14, es: 15 }
+
+export const SAMPLES: Record<string, string> = {
+  en: 'This is how your reading will sound.',
+  ar: 'هكذا ستبدو قراءتك.',
+  fr: 'Voici comment votre lecture va sonner.',
+  de: 'So wird Ihre Lektüre klingen.',
+  es: 'Así sonará tu lectura.',
+  it: 'Ecco come suonerà la tua lettura.',
+  pt: 'É assim que a sua leitura vai soar.',
+}
 
 export class SentenceSpeaker {
   private utt: SpeechSynthesisUtterance | null = null

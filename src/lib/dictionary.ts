@@ -8,6 +8,7 @@ export interface Sense {
 
 export interface Entry {
   word: string // the headword that matched
+  language: string // e.g. "Arabic", "South Levantine Arabic"
   partOfSpeech: string
   senses: Sense[]
 }
@@ -20,6 +21,14 @@ export interface LookupResult {
 const WIKI_LANG_NAME: Record<string, string> = {
   en: 'English', ar: 'Arabic', fr: 'French', de: 'German', es: 'Spanish', it: 'Italian', pt: 'Portuguese',
   tr: 'Turkish', fa: 'Persian', ur: 'Urdu', he: 'Hebrew', ru: 'Russian', nl: 'Dutch', el: 'Greek',
+}
+
+/** Wiktionary language codes to include for each reading language, most standard first. */
+const WIKI_CODES: Record<string, string[]> = {
+  ar: ['ar', 'apc', 'ajp', 'acm', 'arz', 'afb', 'ary'],
+}
+const WIKI_NAMES: Record<string, string[]> = {
+  ar: ['Arabic', 'Levantine Arabic', 'North Levantine Arabic', 'South Levantine Arabic', 'Iraqi Arabic', 'Egyptian Arabic', 'Gulf Arabic', 'Moroccan Arabic'],
 }
 
 const POS = /^(noun|verb|adjective|adverb|pronoun|preposition|conjunction|interjection|particle|determiner|article|numeral|participle|proper noun|prefix|suffix|phrase|contraction|letter|postposition|idiom|proverb|prepositional phrase)/i
@@ -47,10 +56,14 @@ async function viaRest(term: string, lang: Lang): Promise<Entry[] | null> {
   if (r.status === 404) return []
   if (!r.ok) return null
   const data = (await r.json()) as Record<string, { partOfSpeech: string; language: string; definitions: { definition: string }[] }[]>
-  const groups = data[lang] || Object.values(data).flat().filter((g) => g.language === WIKI_LANG_NAME[lang])
+  const codes = WIKI_CODES[lang] || [lang]
+  const names = WIKI_NAMES[lang] || [WIKI_LANG_NAME[lang]]
+  let groups = codes.flatMap((c) => data[c] || [])
+  if (!groups.length) groups = Object.values(data).flat().filter((g) => names.includes(g.language))
   return groups
     .map((g) => ({
       word: term,
+      language: g.language,
       partOfSpeech: g.partOfSpeech,
       senses: g.definitions.map((d) => htmlToSense(d.definition)).filter((s): s is Sense => !!s).slice(0, 4),
     }))
@@ -66,14 +79,16 @@ async function viaParse(term: string, lang: Lang): Promise<Entry[]> {
   const html: string | undefined = data?.parse?.text
   if (!html) return []
   const doc = new DOMParser().parseFromString(html, 'text/html')
-  const want = WIKI_LANG_NAME[lang] || 'English'
+  const wantNames = WIKI_NAMES[lang] || [WIKI_LANG_NAME[lang] || 'English']
   const out: Entry[] = []
   let inLang = false
+  let langName = ''
   let pos = ''
   for (const el of Array.from(doc.querySelectorAll('h2, h3, h4, h5, ol'))) {
     const tag = el.tagName.toLowerCase()
     if (tag === 'h2') {
-      inLang = (el.textContent || '').trim() === want
+      langName = (el.textContent || '').trim()
+      inLang = wantNames.includes(langName)
       pos = ''
     } else if (tag !== 'ol') {
       const t = (el.textContent || '').trim()
@@ -83,7 +98,7 @@ async function viaParse(term: string, lang: Lang): Promise<Entry[]> {
         .map((li) => htmlToSense(li.innerHTML))
         .filter((s): s is Sense => !!s)
         .slice(0, 4)
-      if (senses.length) out.push({ word: term, partOfSpeech: pos, senses })
+      if (senses.length) out.push({ word: term, language: langName, partOfSpeech: pos, senses })
       pos = ''
     }
   }

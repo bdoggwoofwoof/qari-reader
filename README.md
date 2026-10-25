@@ -13,7 +13,14 @@ A personal replacement for Speechify: read PDFs and EPUBs aloud with word-by-wor
 - **Saved words** – list by language, hear them, export a tab-separated file that Anki imports directly (word, meaning, sentence with the word in bold, source, language tag).
 - **Installable** – works as an app on iPhone/Android (Add to Home Screen) and desktop; opens offline once loaded.
 
-Keyboard: Space = play/pause, ← / → = previous / next sentence.
+- **Player** – time left in the section, a progress bar you can tap to jump, a sleep timer (15–60 min or end of section), and a “Back to reading” button when you scroll away.
+- **Practice** – speed per language, pause or repeat after each sentence, a repeat button, and a switch to hide Arabic vowel marks (the voice still reads them).
+- **Cleaner listening** – skips in-text citations like “(Smith, 2019)”, “[12]” and web addresses; a pronunciation list for names and terms.
+- **Lookups** – Arabic lookups also show Levantine, Iraqi and Egyptian entries.
+- **Library** – voice check on first launch, search, rename.
+
+Gestures: tap a word to look it up, double-tap it to read from there.
+Keyboard: Space = play/pause, ← / → = previous / next sentence, R = repeat sentence.
 
 ## Run it
 
