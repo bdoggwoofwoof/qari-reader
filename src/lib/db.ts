@@ -13,13 +13,20 @@ interface QariDB extends DBSchema {
   words: { key: string; value: SavedWord; indexes: { byAdded: number } }
   highlights: { key: string; value: Highlight; indexes: { byDoc: string } }
   files: { key: string; value: StoredFile }
+  vocab: { key: string; value: VocabRecord }
+}
+
+/** Known words for one language: normalized word → time marked (negative = marked not-known again). */
+export interface VocabRecord {
+  lang: string
+  words: Record<string, number>
 }
 
 let dbPromise: Promise<IDBPDatabase<QariDB>> | null = null
 
 function db() {
   if (!dbPromise) {
-    dbPromise = openDB<QariDB>('qari', 2, {
+    dbPromise = openDB<QariDB>('qari', 3, {
       upgrade(d, oldVersion) {
         if (oldVersion < 1) {
           d.createObjectStore('docs', { keyPath: 'id' })
@@ -32,6 +39,7 @@ function db() {
           h.createIndex('byDoc', 'docId')
           d.createObjectStore('files', { keyPath: 'id' })
         }
+        if (oldVersion < 3) d.createObjectStore('vocab', { keyPath: 'lang' })
       },
     })
   }
@@ -40,7 +48,7 @@ function db() {
 
 // ---------- Change notifications (sync listens to these) ----------
 
-type ChangeKind = 'docs' | 'words' | 'position' | 'opened' | 'highlights'
+type ChangeKind = 'docs' | 'words' | 'position' | 'opened' | 'highlights' | 'vocab'
 const changeListeners = new Set<(k: ChangeKind) => void>()
 export function onLocalChange(cb: (k: ChangeKind) => void) {
   changeListeners.add(cb)
@@ -193,4 +201,19 @@ export async function deleteWord(id: string, opts: { fromSync?: boolean } = {}) 
     tombstone('words', id)
     changed('words')
   }
+}
+
+// ---------- Known words ----------
+
+export async function getVocab(lang: string): Promise<VocabRecord> {
+  return (await (await db()).get('vocab', lang)) || { lang, words: {} }
+}
+
+export async function listVocab(): Promise<VocabRecord[]> {
+  return (await db()).getAll('vocab')
+}
+
+export async function putVocab(rec: VocabRecord, opts: { fromSync?: boolean } = {}) {
+  await (await db()).put('vocab', rec)
+  if (!opts.fromSync) changed('vocab')
 }

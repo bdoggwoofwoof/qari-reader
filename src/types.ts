@@ -29,6 +29,7 @@ export interface DocMeta {
   charsBefore: number[] // cumulative char count at start of each chapter (for progress)
   progress?: number // 0..1
   folder?: string
+  vocab?: { unique: number; fresh: number; at: number } // distinct words / new words, for languages you're learning
   updatedAt?: number // title, language, folder and other edits
   positionAt?: number // when the reading position last moved
 }
@@ -47,6 +48,9 @@ export interface SavedWord {
   sentence: string
   source: string
   addedAt: number
+  updatedAt?: number
+  ankiAt?: number // when it was sent to Anki (synced, so a word saved on the phone is sent once, from the laptop)
+  phrase?: boolean
 }
 
 export interface Highlight {
@@ -77,6 +81,9 @@ export interface Settings {
   skipCitations: boolean
   pronunciations: Pronunciation[]
   voiceCheckDone: boolean
+  learning: Lang[] // languages you're learning: new words are marked in their books
+  ankiDecks: Record<Lang, string> // deck to send each language's words to
+  translateCode?: string // access code for the optional Claude translation on your Vercel deployment
   updatedAt?: number // when a synced setting last changed
 }
 

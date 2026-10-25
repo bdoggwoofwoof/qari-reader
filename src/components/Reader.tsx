@@ -13,6 +13,8 @@ import { speechText } from '../lib/speechText'
 import { CHARS_PER_SEC, getVoices, SAMPLES, onVoicesChanged, pickVoice, SentenceSpeaker, speechSupported, speakWord, voicesFor } from '../lib/tts'
 import { ARABIC_FONTS, LANG_NAMES, RTL_LANGS, type ArabicFont, type DocContent, type DocMeta, type Highlight, type Lang } from '../types'
 import LookupSheet, { type Picked } from './LookupSheet'
+import { claudeStatus } from '../lib/translate'
+import { countNew, isKnown, isLearning, isTrackable, setKnown, useVocab, vocabKey } from '../lib/vocab'
 import { Icon, IconButton, Sheet } from './ui'
 
 interface BlockInfo {
@@ -68,6 +70,7 @@ const Block = memo(function Block({
   harakat,
   marks,
   flash,
+  vocab,
 }: {
   text: string
   index: number
@@ -79,6 +82,7 @@ const Block = memo(function Block({
   harakat: boolean
   marks?: Mark[]
   flash?: string // "start:end" of a search result to flash, or undefined
+  vocab?: Map<number, 'new' | 'learning'> // word start → status, in languages you're learning
 }) {
   const [fs, fe] = flash ? flash.split(':').map(Number) : [-1, -1]
   const rtl = RTL_LANGS.has(info.lang)
@@ -103,7 +107,8 @@ const Block = memo(function Block({
       const last = m && !info.words.some((x) => x.start > w.start && x.start < m.end)
       const cls =
         `w${w.start === activeWord && si === activeSent ? ' now' : ''}${w.start === pickedStart ? ' picked' : ''}` +
-        `${m ? ' hl' : ''}${m && last && m.note ? ' hl-note' : ''}${w.start < fe && w.end > fs ? ' flash' : ''}`
+        `${m ? ' hl' : ''}${m && last && m.note ? ' hl-note' : ''}${w.start < fe && w.end > fs ? ' flash' : ''}` +
+        `${vocab?.get(w.start) === 'new' ? ' nw' : vocab?.get(w.start) === 'learning' ? ' lw' : ''}`
       inner.push(
         <span key={w.start} className={cls} data-b={index} data-s={w.start} data-e={w.end} data-h={m?.id}>
           {show(text.slice(w.start, w.end))}
@@ -154,6 +159,7 @@ export default function Reader({ id }: { id: string }) {
   const [flash, setFlash] = useState<{ chapter: number; block: number; start: number; end: number } | null>(null)
   const [viewPage, setViewPage] = useState<{ page: number; label?: string } | null>(null)
   const [hasOriginal, setHasOriginal] = useState(false)
+  const [claudeAvail, setClaudeAvail] = useState(false)
   // The original PDF is here, or can come from sync when a page is opened.
   const canShowOriginal = !!meta && meta.kind === 'pdf' && (hasOriginal || !!getSyncCode())
   const [playing, setPlaying] = useState(false)
@@ -254,6 +260,67 @@ export default function Reader({ id }: { id: string }) {
   }, [blockInfos, meta])
   const hasArabic = chapterLangs.some((l) => RTL_LANGS.has(l))
 
+  useEffect(() => {
+    if (settingsOpen) claudeStatus().then((s) => setClaudeAvail(s.available))
+  }, [settingsOpen])
+
+  // ---------- New words (languages you're learning) ----------
+  const learningLangs = useMemo(() => chapterLangs.filter((l) => settings.learning.includes(l)), [chapterLangs, settings.learning])
+  const vocabVersion = useVocab(learningLangs)
+  const blockVocab = useMemo(() => {
+    void vocabVersion
+    return blockInfos.map((info, b) => {
+      if (!info || !settings.learning.includes(info.lang)) return undefined
+      const text = chapterData!.blocks[b]
+      const m = new Map<number, 'new' | 'learning'>()
+      for (const w of info.words) {
+        const word = text.slice(w.start, w.end)
+        if (!isTrackable(word)) continue
+        const k = vocabKey(word, info.lang)
+        if (isLearning(info.lang, k)) m.set(w.start, 'learning')
+        else if (!isKnown(info.lang, k)) m.set(w.start, 'new')
+      }
+      return m
+    })
+  }, [blockInfos, chapterData, settings.learning, vocabVersion])
+  const sectionNew = useMemo(() => {
+    const byLang = new Map<string, Set<string>>()
+    blockVocab.forEach((m, b) => {
+      if (!m) return
+      const info = blockInfos[b]
+      for (const [start, st] of m) {
+        if (st !== 'new') continue
+        const w = info.words.find((x) => x.start === start)!
+        let set = byLang.get(info.lang)
+        if (!set) byLang.set(info.lang, (set = new Set()))
+        set.add(vocabKey(chapterData!.blocks[b].slice(w.start, w.end), info.lang))
+      }
+    })
+    return byLang
+  }, [blockVocab, blockInfos, chapterData])
+  const sectionNewCount = [...sectionNew.values()].reduce((n, s) => n + s.size, 0)
+  const markSectionKnown = async () => {
+    for (const [lang, set] of sectionNew) await setKnown(lang, [...set])
+  }
+
+  // New-word count for the whole book, shown in the library.
+  useEffect(() => {
+    if (!meta || !content || !settings.learning.includes(meta.lang)) return
+    let done = false
+    const run = () => {
+      if (done) return
+      done = true
+      const texts = content.chapters.flatMap((c) => c.blocks)
+      const { unique, fresh } = countNew(texts, meta.lang, (s) => words(s, meta.lang))
+      updateDocMeta(meta.id, { vocab: { unique, fresh, at: Date.now() } }, 'opened')
+    }
+    const t = window.setTimeout(run, 1500)
+    return () => {
+      clearTimeout(t)
+      run() // leaving the book (or marking words) before the timer: still save the latest count
+    }
+  }, [meta?.id, meta?.lang, content, settings.learning, vocabVersion]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ---------- Highlights ----------
   useEffect(() => {
     const load = () => listHighlights(id).then(setHighlights)
@@ -329,6 +396,21 @@ export default function Reader({ id }: { id: string }) {
     window.getSelection()?.removeAllRanges()
     setSelection(null)
     if (withNote) setOpenHl(h)
+  }
+
+  /** Several selected words: look them up (and translate them) as one phrase. */
+  const lookUpSelection = () => {
+    if (!selection || !content) return
+    const b = selection.startBlock
+    const info = infoFor(chapter, b)
+    const text = content.chapters[chapter].blocks[b]
+    if (!info) return
+    if (playingRef.current) pause()
+    const s1 = info.sents.find((s) => selection.start >= s.start && selection.start < s.end) || { start: 0, end: text.length }
+    const s2 = info.sents.find((s) => selection.end > s.start && selection.end <= s.end) || s1
+    window.getSelection()?.removeAllRanges()
+    setSelection(null)
+    setPicked({ word: selection.text.trim(), lang: info.lang, sentence: text.slice(s1.start, s2.end).trim(), block: b, start: selection.start })
   }
 
   const copySelection = async () => {
@@ -950,11 +1032,23 @@ export default function Reader({ id }: { id: string }) {
                 pickedStart={picked && picked.block === b ? picked.start : -1}
                 harakat={settings.showHarakat}
                 marks={blockMarks[b]}
+                vocab={blockVocab[b]}
                 flash={flash && flash.chapter === chapter && flash.block === b ? `${flash.start}:${flash.end}` : undefined}
               />
             </div>
           )
         })}
+        {sectionNewCount > 0 && (
+          <div className="mt-10 rounded-2xl border border-line bg-paper-2 px-4 py-3 font-ui text-sm">
+            <p className="text-ink-2">
+              <span className="nw rounded px-1 font-semibold text-ink">{sectionNewCount}</span> new {sectionNewCount === 1 ? 'word' : 'words'} in this section. Done with it? Mark
+              the ones you didn’t look up as known, so next time only the words you still need stand out.
+            </p>
+            <button type="button" onClick={markSectionKnown} className="mt-2 h-9 rounded-full bg-moss px-4 font-semibold text-moss-ink">
+              Mark {sectionNewCount} as known
+            </button>
+          </div>
+        )}
         <div className="mt-12 flex justify-between gap-3 font-ui text-sm">
           <button type="button" disabled={chapter === 0} onClick={() => goChapter(chapter - 1)} className="rounded-full border border-line px-4 py-2 disabled:opacity-30">
             Previous section
@@ -984,15 +1078,28 @@ export default function Reader({ id }: { id: string }) {
                 onClick={() => makeHighlight(true)}
                 className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-paper-2"
               >
-                <Icon name="note" size={16} /> Add note
+                <Icon name="note" size={16} /> Note
               </button>
+              {selection.startBlock === selection.endBlock && (
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={lookUpSelection}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-paper-2"
+                >
+                  <Icon name={selection.text.trim().split(/\s+/).length > 6 ? 'translate' : 'search'} size={16} />{' '}
+                  {selection.text.trim().split(/\s+/).length > 6 ? 'Translate' : 'Look up'}
+                </button>
+              )}
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={copySelection}
-                className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-sm hover:bg-paper-2"
+                aria-label="Copy quote with citation"
+                title="Copy quote with citation"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-sm hover:bg-paper-2"
               >
-                <Icon name="paste" size={16} /> Copy quote
+                <Icon name="paste" size={16} />
               </button>
             </div>
           </div>
@@ -1278,6 +1385,50 @@ export default function Reader({ id }: { id: string }) {
           <p className="mt-1 text-xs text-ink-3">Paragraphs in Arabic script are read with the Arabic voice automatically.</p>
         </section>
 
+        <section className="mb-6">
+          <h3 className="mb-1 font-semibold">Languages you’re learning</h3>
+          <p className="mb-2 text-sm text-ink-3">
+            In these, words you haven’t marked known are tinted <span className="nw rounded px-1 text-ink">like this</span> and saved words are{' '}
+            <span className="lw text-ink">underlined</span>.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {Object.entries(LANG_NAMES).map(([k, v]) => {
+              const on = settings.learning.includes(k)
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => updateSettings({ learning: on ? settings.learning.filter((x) => x !== k) : [...settings.learning, k] })}
+                  className={`h-8 rounded-full border px-3 text-sm ${on ? 'border-moss bg-wash font-semibold' : 'border-line text-ink-2'}`}
+                >
+                  {v}
+                </button>
+              )
+            })}
+          </div>
+        </section>
+
+        {(claudeAvail || settings.translateCode) && (
+          <section className="mb-6">
+            <label htmlFor="tr-code" className="mb-1 block font-semibold">
+              Claude translation
+            </label>
+            <p className="mb-2 text-sm text-ink-3">
+              Explains phrases in context and says whether Arabic is Shami, Egyptian or Fusha. Enter the access code you set in Vercel; leave it empty to use the free translator.
+            </p>
+            <input
+              id="tr-code"
+              type="password"
+              autoComplete="off"
+              value={settings.translateCode || ''}
+              onChange={(e) => updateSettings({ translateCode: e.target.value })}
+              placeholder="Access code"
+              className="h-11 w-full rounded-xl border border-line bg-paper-2 px-3 outline-none focus:border-moss"
+            />
+          </section>
+        )}
+
         <section className="mb-6 flex items-center justify-between gap-4">
           <h3 className="font-semibold">Text size</h3>
           <div className="flex items-center gap-1">
@@ -1344,6 +1495,8 @@ export default function Reader({ id }: { id: string }) {
         voiceURI={picked ? settings.voices[picked.lang] : undefined}
         onClose={() => setPicked(null)}
         onReadFromHere={readFromHere}
+        learning={!!picked && settings.learning.includes(picked.lang)}
+        translateTo={meta.lang === 'en' && picked?.lang === 'en' ? undefined : 'en'}
       />
 
       <HighlightSheet

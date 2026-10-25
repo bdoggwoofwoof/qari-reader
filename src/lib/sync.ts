@@ -5,6 +5,8 @@ import {
   deleteHighlight,
   deleteWord,
   getContent,
+  listVocab,
+  putVocab,
   getFile as getStoredFile,
   listDocs,
   listHighlights,
@@ -38,6 +40,7 @@ interface Manifest {
   deletedDocs: Record<string, number>
   deletedWords: Record<string, number>
   deletedHighlights: Record<string, number>
+  vocab?: Record<string, Record<string, number>> // known words per language (negative time = unmarked)
   settings?: SyncedSettings
 }
 
@@ -226,19 +229,38 @@ async function syncOnce(k: SyncKeys): Promise<{ changedLocal: boolean }> {
     const localWords = new Map((await listWords()).map((w) => [w.id, w]))
     const words: Record<string, SavedWord> = {}
     for (const id of new Set([...localWords.keys(), ...Object.keys(remote.words)])) {
-      const w = localWords.get(id) || remote.words[id]
-      if (deletedWords[id] && deletedWords[id] >= w.addedAt) {
+      const l = localWords.get(id)
+      const r = remote.words[id]
+      // Newest edit wins; "sent to Anki" sticks once either device has sent it.
+      let w = l && r ? ((r.updatedAt ?? r.addedAt) > (l.updatedAt ?? l.addedAt) ? r : l) : (l || r)!
+      if (l && r && (l.ankiAt || r.ankiAt) && !w.ankiAt) w = { ...w, ankiAt: Math.max(l.ankiAt ?? 0, r.ankiAt ?? 0) }
+      if (deletedWords[id] && deletedWords[id] >= (w.updatedAt ?? w.addedAt)) {
         if (localWords.has(id)) {
           await deleteWord(id, { fromSync: true })
           changedLocal = true
         }
         continue
       }
-      if (!localWords.has(id)) {
+      if (w !== l && JSON.stringify(w) !== JSON.stringify(l)) {
         await saveWord(w, { fromSync: true })
         changedLocal = true
       }
       words[id] = w
+    }
+
+    // Known words: per word, the latest mark (known or unmarked) wins.
+    const vocab: Record<string, Record<string, number>> = {}
+    const localVocab = new Map((await listVocab()).map((v) => [v.lang, v.words]))
+    for (const lang of new Set([...localVocab.keys(), ...Object.keys(remote.vocab || {})])) {
+      const a = localVocab.get(lang) || {}
+      const b = remote.vocab?.[lang] || {}
+      const merged: Record<string, number> = { ...a }
+      for (const [k, t] of Object.entries(b)) if (Math.abs(t) > Math.abs(merged[k] ?? 0)) merged[k] = t
+      vocab[lang] = merged
+      if (JSON.stringify(merged) !== JSON.stringify(a)) {
+        await putVocab({ lang, words: merged }, { fromSync: true })
+        changedLocal = true
+      }
     }
 
     // Highlights and notes: newest edit wins; a later deletion wins over an older edit.
@@ -271,7 +293,7 @@ async function syncOnce(k: SyncKeys): Promise<{ changedLocal: boolean }> {
     }
 
     saveTombstones({ docs: deletedDocs, words: deletedWords, highlights: deletedHighlights })
-    const next: Manifest = { v: 1, docs, words, highlights, deletedDocs, deletedWords, deletedHighlights, settings }
+    const next: Manifest = { v: 1, docs, words, highlights, deletedDocs, deletedWords, deletedHighlights, vocab, settings }
     const strip = (m: Manifest) => JSON.stringify({ ...m, v: 1 })
     if (remoteFile && strip(next) === strip(remote)) {
       lastManifest = next
@@ -367,7 +389,7 @@ let wired = false
 function wire() {
   if (wired) return
   wired = true
-  onLocalChange((kind) => schedule(kind === 'position' ? 20_000 : 2_000))
+  onLocalChange((kind) => schedule(kind === 'position' || kind === 'vocab' ? 20_000 : 2_000))
   onSettingsChange(() => schedule(3_000))
   document.addEventListener('visibilitychange', () => {
     if (!keys) return

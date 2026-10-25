@@ -451,6 +451,11 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
                       {d.author && <span className="truncate">{d.author}</span>}
                       <span>{LANG_NAMES[d.lang] || d.lang}</span>
                       <span>{kindLabel(d)}</span>
+                      {d.vocab && settings.learning.includes(d.lang) && d.vocab.unique > 0 && (
+                        <span className="text-moss" title={`${d.vocab.fresh} of ${d.vocab.unique} different words are new to you`}>
+                          {d.vocab.fresh === 0 ? 'No new words' : `${d.vocab.fresh} new ${d.vocab.fresh === 1 ? 'word' : 'words'} (${Math.round((d.vocab.fresh / d.vocab.unique) * 100)}%)`}
+                        </span>
+                      )}
                       <span>Opened {ago(d.openedAt)}</span>
                     </div>
                     <div className="mt-2.5 h-[3px] w-full max-w-xs overflow-hidden rounded-full bg-line" aria-label={`${Math.round(p * 100)}% read`}>

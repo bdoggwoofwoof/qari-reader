@@ -15,6 +15,8 @@ const DEFAULTS: Settings = {
   skipCitations: true,
   pronunciations: [],
   voiceCheckDone: false,
+  learning: ['ar', 'fr', 'de'],
+  ankiDecks: {},
 }
 
 function load(): Settings {
@@ -30,7 +32,7 @@ const listeners = new Set<(s: Settings) => void>()
 let current = load()
 
 /** Settings that follow you between devices. Voices and the voice check stay per device. */
-export const SYNCED_KEYS = ['rate', 'rates', 'fontSize', 'theme', 'autoScroll', 'arabicFont', 'afterSentence', 'showHarakat', 'skipCitations', 'pronunciations'] as const
+export const SYNCED_KEYS = ['rate', 'rates', 'fontSize', 'theme', 'autoScroll', 'arabicFont', 'afterSentence', 'showHarakat', 'skipCitations', 'pronunciations', 'learning', 'ankiDecks', 'translateCode'] as const
 export type SyncedSettings = Pick<Settings, (typeof SYNCED_KEYS)[number]> & { updatedAt?: number }
 
 const settingsListeners = new Set<() => void>()
