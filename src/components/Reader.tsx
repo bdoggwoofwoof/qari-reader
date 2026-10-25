@@ -890,6 +890,7 @@ export default function Reader({ id }: { id: string }) {
               </span>
             )}
           </span>
+          <IconButton icon="words" label="Saved words" onClick={() => go('words')} className="max-[359px]:hidden" />
           <IconButton icon="sliders" label="Reading settings" onClick={() => setSettingsOpen(true)} />
         </div>
       </header>

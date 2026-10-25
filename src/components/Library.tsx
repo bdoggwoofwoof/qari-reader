@@ -5,7 +5,8 @@ import { useSettings } from '../lib/settings'
 import VoiceCheck from './VoiceCheck'
 import SyncSheet from './SyncSheet'
 import { useSyncStatus } from '../lib/sync'
-import { importFile, importText } from '../lib/importer'
+import { findUrl, importArticle, importFile, importScannedPdf, importScans, importText, isImage } from '../lib/importer'
+import { NeedsOcrError } from '../lib/extract/errors'
 import { LANG_NAMES, type DocMeta } from '../types'
 import { Icon, IconButton, Sheet } from './ui'
 
@@ -27,9 +28,45 @@ function ago(t: number) {
 
 const NO_FOLDER = '\u0000none'
 
-export default function Library({ joinCode }: { joinCode?: string }) {
+const OCR_CHOICES: [string, string, string][] = [
+  ['en', 'English', 'English'],
+  ['ar', 'Arabic', 'العربية'],
+  ['fr', 'French', 'Français'],
+  ['de', 'German', 'Deutsch'],
+]
+
+function kindLabel(d: DocMeta) {
+  if (d.kind === 'web') {
+    try {
+      return d.source ? new URL(d.source).hostname.replace(/^www\./, '') : 'Web page'
+    } catch {
+      return 'Web page'
+    }
+  }
+  return { pdf: 'PDF', epub: 'EPUB', text: 'Text', docx: 'Word', scan: 'Scan' }[d.kind] || d.kind
+}
+
+export interface Shared {
+  title?: string
+  text?: string
+  url?: string
+}
+
+export default function Library({ joinCode, shared }: { joinCode?: string; shared?: Shared }) {
   const [docs, setDocs] = useState<DocMeta[] | null>(null)
-  const [busy, setBusy] = useState<{ name: string; p: number } | null>(null)
+  const [busy, setBusy] = useState<{ name: string; p: number; label?: string } | null>(null)
+  const [ocrAsk, setOcrAsk] = useState<{ images: File[]; pdfs: File[] } | null>(null)
+  const [ocrLang, setOcrLang] = useState(() => {
+    try {
+      return localStorage.getItem('qari.ocrLang') || 'en'
+    } catch {
+      return 'en'
+    }
+  })
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [link, setLink] = useState('')
+  const [linkError, setLinkError] = useState<string | null>(null)
+  const scanInput = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
@@ -59,26 +96,140 @@ export default function Library({ joinCode }: { joinCode?: string }) {
     return () => window.removeEventListener('qari:synced', refresh)
   }, [refresh])
 
+  // Keep the screen on during long imports (text recognition can take a few minutes on a phone).
+  useEffect(() => {
+    if (!busy || !('wakeLock' in navigator)) return
+    let lock: { release: () => Promise<void> } | null = null
+    ;(navigator as unknown as { wakeLock: { request: (t: string) => Promise<{ release: () => Promise<void> }> } }).wakeLock
+      .request('screen')
+      .then((l) => (lock = l))
+      .catch(() => {})
+    return () => {
+      lock?.release().catch(() => {})
+    }
+  }, [!!busy]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Something shared to Qari from another app (Android): a link opens "Add a web link", text opens "Paste text".
+  useEffect(() => {
+    if (!shared) return
+    const u = shared.url || findUrl(shared.text || '') || findUrl(shared.title || '')
+    if (u) {
+      setLink(u)
+      setLinkOpen(true)
+    } else if (shared.text) {
+      setPasteText(shared.text)
+      setPasteOpen(true)
+    }
+  }, [shared])
+
+  /** Saves an imported document (into the open folder, if any), keeping the original PDF for the page view and sync. */
+  const store = async (meta: DocMeta, content: Parameters<typeof saveDoc>[1], file?: File) => {
+    if (folder && folder !== NO_FOLDER) meta.folder = folder
+    if (meta.kind === 'pdf' && file) await saveFile(meta.id, new Blob([await file.arrayBuffer()], { type: 'application/pdf' }))
+    await saveDoc(meta, content)
+    return meta.id
+  }
+
+  const fail = (name: string, e: unknown) => setError(`${name}: ${e instanceof Error ? e.message : String(e)}`)
+
   const handleFiles = async (files: FileList | File[]) => {
     setError(null)
-    let lastId: string | null = null
     const list = Array.from(files)
-    for (const f of list) {
+    const images = list.filter(isImage)
+    const scannedPdfs: File[] = []
+    let lastId: string | null = null
+    let added = 0
+    for (const f of list.filter((x) => !isImage(x))) {
       setBusy({ name: f.name, p: 0 })
       try {
         const { meta, content } = await importFile(f, (p) => setBusy({ name: f.name, p }))
-        if (folder && folder !== NO_FOLDER) meta.folder = folder // adding while a folder is open puts the book in it
-        // Keep the original PDF so tables and figures can be seen as printed. Saved first so sync can send it along.
-        if (meta.kind === 'pdf') await saveFile(meta.id, new Blob([await f.arrayBuffer()], { type: 'application/pdf' }))
-        await saveDoc(meta, content)
-        lastId = meta.id
+        lastId = await store(meta, content, f)
+        added++
       } catch (e) {
-        setError(`${f.name}: ${e instanceof Error ? e.message : String(e)}`)
+        if (e instanceof NeedsOcrError) scannedPdfs.push(f)
+        else fail(f.name, e)
       }
     }
     setBusy(null)
     await refresh()
-    if (lastId && list.length === 1) go('read/' + lastId)
+    // Photos and scanned PDFs need their text recognized: ask which language first.
+    if (images.length || scannedPdfs.length) return setOcrAsk({ images, pdfs: scannedPdfs })
+    if (lastId && added === 1) go('read/' + lastId)
+  }
+
+  const runOcr = async () => {
+    const job = ocrAsk
+    if (!job) return
+    setOcrAsk(null)
+    try {
+      localStorage.setItem('qari.ocrLang', ocrLang)
+    } catch {
+      /* ignore */
+    }
+    let lastId: string | null = null
+    let count = 0
+    if (job.images.length) {
+      const name = job.images.length === 1 ? job.images[0].name : `${job.images.length} photos`
+      setBusy({ name, p: 0 })
+      try {
+        const { meta, content } = await importScans(job.images, ocrLang, (p, label) => setBusy({ name, p, label }))
+        lastId = await store(meta, content)
+        count++
+      } catch (e) {
+        fail(name, e)
+      }
+    }
+    for (const f of job.pdfs) {
+      setBusy({ name: f.name, p: 0 })
+      try {
+        const { meta, content } = await importScannedPdf(f, ocrLang, (p, label) => setBusy({ name: f.name, p, label }))
+        lastId = await store(meta, content, f)
+        count++
+      } catch (e) {
+        fail(f.name, e)
+      }
+    }
+    setBusy(null)
+    await refresh()
+    if (lastId && count === 1) go('read/' + lastId)
+  }
+
+  const addLink = async () => {
+    const raw = link.trim()
+    const url = findUrl(raw) || (/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(raw) ? 'https://' + raw : null)
+    if (!url) return setLinkError('That doesn’t look like a web address. It should start with https://')
+    setLinkError(null)
+    setLinkOpen(false)
+    const name = (() => {
+      try {
+        return new URL(url).hostname.replace(/^www\./, '')
+      } catch {
+        return url
+      }
+    })()
+    setBusy({ name, p: 0.35, label: 'Fetching the article from' })
+    try {
+      const { meta, content } = await importArticle(url)
+      const id = await store(meta, content)
+      setLink('')
+      setBusy(null)
+      go('read/' + id)
+    } catch (e) {
+      setBusy(null)
+      setLink(url)
+      setLinkError(e instanceof Error ? e.message : String(e))
+      setLinkOpen(true)
+    }
+  }
+
+  const pasteLink = async () => {
+    try {
+      const t = await navigator.clipboard.readText()
+      setLink(findUrl(t) || t.trim())
+      setLinkError(null)
+    } catch {
+      setLinkError('Couldn’t read the clipboard. Long-press the box and choose Paste.')
+    }
   }
 
   const savePaste = async () => {
@@ -175,9 +326,21 @@ export default function Library({ joinCode }: { joinCode?: string }) {
         <input
           ref={input}
           type="file"
-          accept=".pdf,.epub,.txt,application/pdf,application/epub+zip,text/plain"
+          accept=".pdf,.epub,.docx,.txt,.md,.html,.htm,application/pdf,application/epub+zip,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/html,image/*"
           multiple
           hidden
+          onChange={(e) => {
+            if (e.target.files?.length) handleFiles(e.target.files)
+            e.target.value = ''
+          }}
+        />
+        <input
+          ref={scanInput}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          aria-label="Photos of pages"
           onChange={(e) => {
             if (e.target.files?.length) handleFiles(e.target.files)
             e.target.value = ''
@@ -189,7 +352,9 @@ export default function Library({ joinCode }: { joinCode?: string }) {
         {busy && (
           <div className="mt-4 rounded-xl border border-line bg-paper-2 px-4 py-3 text-sm" role="status">
             <div className="flex justify-between gap-3">
-              <span className="truncate">Reading {busy.name}</span>
+              <span className="truncate">
+                {busy.label || 'Reading'} {busy.label ? <span className="text-ink-3">· {busy.name}</span> : busy.name}
+              </span>
               <span className="tabular-nums text-ink-2">{Math.round(busy.p * 100)}%</span>
             </div>
             <div className="mt-2 h-1 overflow-hidden rounded-full bg-line">
@@ -217,7 +382,7 @@ export default function Library({ joinCode }: { joinCode?: string }) {
             </span>
             <span className="mt-4 font-read text-2xl">Add something to read</span>
             <span className="mt-2 max-w-sm text-ink-2">
-              Choose a PDF or EPUB, or drop it here. {sync.state === 'off' ? 'It stays on this device unless you turn on sync.' : 'It syncs to your other devices.'}
+              Choose a PDF, EPUB or Word file, or drop it here. You can also scan pages or add a web link. {sync.state === 'off' ? 'It stays on this device unless you turn on sync.' : 'It syncs to your other devices.'}
             </span>
           </button>
         )}
@@ -285,7 +450,7 @@ export default function Library({ joinCode }: { joinCode?: string }) {
                       )}
                       {d.author && <span className="truncate">{d.author}</span>}
                       <span>{LANG_NAMES[d.lang] || d.lang}</span>
-                      <span>{d.kind.toUpperCase()}</span>
+                      <span>{kindLabel(d)}</span>
                       <span>Opened {ago(d.openedAt)}</span>
                     </div>
                     <div className="mt-2.5 h-[3px] w-full max-w-xs overflow-hidden rounded-full bg-line" aria-label={`${Math.round(p * 100)}% read`}>
@@ -308,7 +473,7 @@ export default function Library({ joinCode }: { joinCode?: string }) {
             })}
           </ul>
         )}
-        {docs && docs.length > 0 && <p className="mt-4 text-center text-sm text-ink-3">Drop PDFs or EPUBs anywhere on this page to add them.</p>}
+        {docs && docs.length > 0 && <p className="mt-4 text-center text-sm text-ink-3">Drop PDFs, EPUBs, Word files or photos of pages anywhere here to add them.</p>}
       </main>
 
       <Sheet open={addOpen} onClose={() => setAddOpen(false)} title="Add to your library">
@@ -324,7 +489,36 @@ export default function Library({ joinCode }: { joinCode?: string }) {
             <Icon name="plus" size={20} className="text-moss" />
             <span>
               <span className="block font-semibold">Choose a file</span>
-              <span className="text-sm text-ink-3">PDF, EPUB or text file</span>
+              <span className="text-sm text-ink-3">PDF, EPUB, Word, web page or text file</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAddOpen(false)
+              scanInput.current?.click()
+            }}
+            className="flex items-center gap-3 rounded-xl border border-line px-4 py-3 text-left hover:bg-paper-2"
+          >
+            <Icon name="camera" size={20} className="text-moss" />
+            <span>
+              <span className="block font-semibold">Scan pages</span>
+              <span className="text-sm text-ink-3">Take photos of a book or handout, or pick them from your photos</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAddOpen(false)
+              setLinkError(null)
+              setLinkOpen(true)
+            }}
+            className="flex items-center gap-3 rounded-xl border border-line px-4 py-3 text-left hover:bg-paper-2"
+          >
+            <Icon name="link" size={20} className="text-moss" />
+            <span>
+              <span className="block font-semibold">Add a web link</span>
+              <span className="text-sm text-ink-3">An article or blog post, without the menus and ads</span>
             </span>
           </button>
           <button
@@ -342,6 +536,77 @@ export default function Library({ joinCode }: { joinCode?: string }) {
             </span>
           </button>
         </div>
+      </Sheet>
+
+      <Sheet open={linkOpen} onClose={() => setLinkOpen(false)} title="Add a web link">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            addLink()
+          }}
+        >
+          <div className="flex gap-2">
+            <input
+              value={link}
+              onChange={(e) => {
+                setLink(e.target.value)
+                setLinkError(null)
+              }}
+              type="text"
+              inputMode="url"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              autoFocus
+              aria-label="Web address"
+              placeholder="https://"
+              className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-paper-2 px-3 outline-none focus:border-moss"
+            />
+            <button type="button" onClick={pasteLink} className="h-11 shrink-0 rounded-xl border border-line px-3 text-sm hover:bg-paper-2">
+              Paste
+            </button>
+          </div>
+          {linkError && (
+            <p className="mt-2 text-sm text-danger" role="alert">
+              {linkError}
+            </p>
+          )}
+          <button type="submit" disabled={!link.trim()} className="mt-3 h-11 w-full rounded-full bg-moss font-semibold text-moss-ink disabled:opacity-40">
+            Add article
+          </button>
+          <p className="mt-3 mb-2 text-sm text-ink-3">Works with most news sites, blogs and journals. Pages behind a login can’t be fetched; copy their text and use Paste text instead.</p>
+        </form>
+      </Sheet>
+
+      <Sheet open={!!ocrAsk} onClose={() => setOcrAsk(null)} title="What language is the text in?">
+        <p className="mb-3 text-sm text-ink-2">
+          {ocrAsk && ocrAsk.pdfs.length > 0 && !ocrAsk.images.length
+            ? `${ocrAsk.pdfs.length === 1 ? 'This PDF is' : 'These PDFs are'} scanned page images, so the text has to be recognized first.`
+            : `Qari will read the text in ${ocrAsk?.images.length === 1 ? 'this photo' : `these ${ocrAsk?.images.length} photos`}${ocrAsk?.pdfs.length ? ' and the scanned PDFs' : ''}.`}{' '}
+          It happens on this device; nothing is uploaded.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {OCR_CHOICES.map(([code, name, native]) => (
+            <button
+              key={code}
+              type="button"
+              onClick={() => setOcrLang(code)}
+              aria-pressed={ocrLang === code}
+              className={`flex h-14 flex-col items-center justify-center rounded-xl border ${ocrLang === code ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
+            >
+              <span lang={code} dir={code === 'ar' ? 'rtl' : 'ltr'} className={code === 'ar' ? 'font-arabic text-lg leading-tight' : ''}>
+                {native}
+              </span>
+              {native !== name && <span className="text-xs text-ink-3">{name}</span>}
+            </button>
+          ))}
+        </div>
+        <button type="button" onClick={runOcr} className="mt-4 h-11 w-full rounded-full bg-moss font-semibold text-moss-ink">
+          Read the text
+        </button>
+        <p className="mt-3 mb-2 text-xs text-ink-3">
+          The first time takes a moment to download the {OCR_CHOICES.find((c) => c.at(0) === ocrLang)?.at(1)} reader (1–3 MB); after that it works offline. Best results: flat pages, good light, the page filling the photo.
+        </p>
       </Sheet>
 
       <SyncSheet open={syncOpen} onClose={() => setSyncOpen(false)} joinCode={joinCode} />

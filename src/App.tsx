@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import Library from './components/Library'
+import Library, { type Shared } from './components/Library'
 import Reader from './components/Reader'
 import Words from './components/Words'
 import { useSettings } from './lib/settings'
@@ -18,6 +18,14 @@ function useHashRoute() {
 export function go(path: string) {
   window.location.hash = '/' + path
 }
+
+// Android "Share → Qari" opens the app with ?url=…&text=…&title=… (see share_target in vite.config.ts).
+const shared: Shared | undefined = (() => {
+  const q = new URLSearchParams(location.search)
+  if (!q.has('url') && !q.has('text')) return undefined
+  history.replaceState(null, '', location.pathname + location.hash)
+  return { title: q.get('title') || undefined, text: q.get('text') || undefined, url: q.get('url') || undefined }
+})()
 
 export default function App() {
   const route = useHashRoute()
@@ -40,5 +48,5 @@ export default function App() {
   if (route[0] === 'read' && route[1]) return <Reader key={route[1]} id={route[1]} />
   if (route[0] === 'words') return <Words />
   if (route[0] === 'sync' && route[1]) return <Library key="join" joinCode={route[1].toUpperCase()} />
-  return <Library />
+  return <Library shared={shared} />
 }

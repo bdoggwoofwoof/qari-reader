@@ -1,6 +1,7 @@
 import * as pdfjs from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { Chapter } from '../../types'
+import { NeedsOcrError } from './errors'
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -202,9 +203,9 @@ export async function extractPdf(data: ArrayBuffer, onProgress?: (p: number) => 
 
   const totalChars = pages.reduce((n, p) => n + p.lines.reduce((m, l) => m + l.text.length, 0), 0)
   if (totalChars < doc.numPages * 20) {
-    throw new Error(
-      "This PDF doesn't contain selectable text — it looks like scanned page images. Reading scans needs text recognition (OCR), which is planned for a later version.",
-    )
+    const n = doc.numPages
+    await task.destroy()
+    throw new NeedsOcrError(n)
   }
 
   // Body text size = the size most characters are set in.
@@ -301,4 +302,34 @@ async function finishMeta(doc: pdfjs.PDFDocumentProxy, task: pdfjs.PDFDocumentLo
   }
   await task.destroy()
   return { title, author, lang, chapters }
+}
+
+/**
+ * Prepares each page of a scanned PDF for text recognition: a function per page that renders it
+ * at about 300 dpi when called, so only one page is in memory at a time.
+ */
+export async function pdfPagesForOcr(data: ArrayBuffer) {
+  const { doc, close } = await openPdf(data)
+  let labels: string[] | null = null
+  try {
+    labels = await doc.getPageLabels()
+  } catch {
+    labels = null
+  }
+  const sources = Array.from({ length: doc.numPages }, (_, i) => async () => {
+    const page = await doc.getPage(i + 1)
+    const base = page.getViewport({ scale: 1 })
+    const scale = Math.min(300 / 72, 3200 / Math.max(base.width, base.height))
+    const vp = page.getViewport({ scale })
+    const c = document.createElement('canvas')
+    c.width = Math.round(vp.width)
+    c.height = Math.round(vp.height)
+    const ctx = c.getContext('2d')!
+    ctx.fillStyle = '#fff'
+    ctx.fillRect(0, 0, c.width, c.height)
+    await page.render({ canvas: c, canvasContext: ctx, viewport: vp }).promise
+    page.cleanup()
+    return c
+  })
+  return { sources, label: (i: number) => labels?.[i]?.trim() || String(i + 1), close }
 }

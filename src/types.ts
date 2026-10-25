@@ -18,7 +18,8 @@ export interface DocMeta {
   id: string
   title: string
   author?: string
-  kind: 'pdf' | 'epub' | 'text'
+  kind: 'pdf' | 'epub' | 'text' | 'docx' | 'web' | 'scan'
+  source?: string // web address, for articles added by link
   lang: Lang
   addedAt: number
   openedAt: number

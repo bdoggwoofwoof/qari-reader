@@ -6,7 +6,9 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 }
 
-function finish(ex: Extracted, kind: DocMeta['kind'], fallbackTitle: string): { meta: DocMeta; content: DocContent } {
+export type Progress = (p: number, label?: string) => void
+
+function finish(ex: Extracted, kind: DocMeta['kind'], fallbackTitle: string, extra: Partial<DocMeta> = {}): { meta: DocMeta; content: DocContent } {
   const id = uid()
   const sample = ex.chapters
     .flatMap((c) => c.blocks)
@@ -36,13 +38,21 @@ function finish(ex: Extracted, kind: DocMeta['kind'], fallbackTitle: string): { 
       chapterCount: ex.chapters.length,
       charCount: total,
       charsBefore,
+      ...extra,
     },
     content: { id, chapters: ex.chapters },
   }
 }
 
-export async function importFile(file: File, onProgress?: (p: number) => void) {
-  const name = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim()
+const nameOf = (file: File) => file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim()
+
+export function isImage(file: File) {
+  return file.type.startsWith('image/') || /\.(jpe?g|png|heic|heif|webp|gif|bmp|tiff?)$/i.test(file.name)
+}
+
+/** PDFs, EPUBs, Word files, saved web pages and text files. Scanned PDFs throw NeedsOcrError (see importScannedPdf). */
+export async function importFile(file: File, onProgress?: Progress) {
+  const name = nameOf(file)
   const ext = file.name.split('.').pop()?.toLowerCase()
   const data = await file.arrayBuffer()
   if (ext === 'pdf' || file.type === 'application/pdf') {
@@ -53,10 +63,66 @@ export async function importFile(file: File, onProgress?: (p: number) => void) {
     const { extractEpub } = await import('./extract/epub')
     return finish(await extractEpub(data, onProgress), 'epub', name)
   }
+  if (ext === 'docx' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    const { extractDocx } = await import('./extract/docx')
+    return finish(await extractDocx(data, name), 'docx', name)
+  }
+  if (ext === 'doc') throw new Error('Older Word (.doc) files can’t be read. Open it in Word or Pages and save it as .docx, then add that.')
+  if (ext === 'html' || ext === 'htm' || file.type === 'text/html') {
+    return importHtml(new TextDecoder().decode(data), name)
+  }
   if (ext === 'txt' || ext === 'md' || file.type.startsWith('text/')) {
     return importText(new TextDecoder().decode(data), name)
   }
-  throw new Error(`“${file.name}” isn’t a PDF, EPUB or text file.`)
+  throw new Error(`“${file.name}” isn’t a file Qari can read. It reads PDF, EPUB, Word (.docx), web pages, text, and photos of pages.`)
+}
+
+/** Photos of pages (one document, in the order given), read with text recognition. */
+export async function importScans(files: File[], lang: string, onProgress: Progress) {
+  const { ocrPages } = await import('./extract/ocr')
+  const ex = await ocrPages(files, lang, onProgress)
+  return finish({ ...ex, lang }, 'scan', 'Scanned pages')
+}
+
+/** A PDF made of page images, read with text recognition. Keeps the PDF's printed page numbers. */
+export async function importScannedPdf(file: File, lang: string, onProgress: Progress) {
+  const { pdfPagesForOcr } = await import('./extract/pdf')
+  const { ocrPages } = await import('./extract/ocr')
+  const { sources, label, close } = await pdfPagesForOcr(await file.arrayBuffer())
+  try {
+    const ex = await ocrPages(sources, lang, onProgress, label)
+    return finish({ ...ex, title: undefined, lang }, 'pdf', nameOf(file))
+  } finally {
+    await close()
+  }
+}
+
+/** HTML (a saved web page, or an article fetched by link) → sections at its headings. */
+async function htmlToExtracted(html: string, fallbackTitle: string): Promise<Extracted> {
+  const { chapterBlocks, splitAtHeadings } = await import('./extract/html')
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const { blocks, headings } = chapterBlocks(doc.body)
+  if (!blocks.length) throw new Error('No readable text was found.')
+  const title = doc.querySelector('title')?.textContent?.trim() || undefined
+  return { title, lang: doc.documentElement.getAttribute('lang') || undefined, chapters: splitAtHeadings(blocks, headings, title || fallbackTitle) }
+}
+
+export async function importHtml(html: string, name: string) {
+  return finish(await htmlToExtracted(html, name), 'web', name)
+}
+
+/** An article from the web, fetched through Qari's server function (sites don't let other sites read them directly). */
+export async function importArticle(url: string) {
+  let r: Response
+  try {
+    r = await fetch(`/api/article?url=${encodeURIComponent(url)}`)
+  } catch {
+    throw new Error('You’re offline, so the page can’t be fetched.')
+  }
+  const j = await r.json().catch(() => ({ error: 'The page couldn’t be read.' }))
+  if (!r.ok) throw new Error(j.error || 'The page couldn’t be read.')
+  const ex = await htmlToExtracted(j.html, j.title)
+  return finish({ ...ex, title: j.title, author: j.byline || j.siteName, lang: j.lang || ex.lang }, 'web', j.title, { source: j.url })
 }
 
 export function importText(text: string, title?: string) {
@@ -67,4 +133,9 @@ export function importText(text: string, title?: string) {
     .filter(Boolean)
   const t = title || blocks[0]?.slice(0, 60) || 'Pasted text'
   return finish({ chapters: [{ title: t, blocks }] }, 'text', t)
+}
+
+/** The first web address in some shared or pasted text, if any. */
+export function findUrl(text: string) {
+  return text.match(/https?:\/\/[^\s<>"'“”]+[^\s<>"'“”.,;:!?)\]]/i)?.[0] || null
 }

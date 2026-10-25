@@ -4,7 +4,7 @@ A personal replacement for Speechify: read PDFs and EPUBs aloud with word-by-wor
 
 ## What it does (v0.1)
 
-- **Library** – add PDFs, EPUBs, text files, or pasted text. Everything is stored on the device (IndexedDB); nothing is uploaded.
+- **Library** – add PDFs, EPUBs, Word (.docx) files, saved web pages, text files, pasted text, web articles by link, or photos of pages. Everything is stored on the device (IndexedDB) unless you turn on sync.
 - **PDF clean-up** – drops running headers, page numbers, footnotes and footnote markers; re-joins hyphenated words and paragraphs split across pages; splits into sections using the PDF outline, or its headings, or 10-page groups.
 - **EPUB** – reads the spine and table of contents, skips footnotes; detects DRM-protected books and says so.
 - **Read aloud** – the device's own voices (free). Sentence-by-sentence playback, current sentence tinted and current word highlighted, speed 0.5–3×, skip by sentence, remembers your place, keeps the screen awake while playing, lock-screen controls where supported.
@@ -18,6 +18,7 @@ A personal replacement for Speechify: read PDFs and EPUBs aloud with word-by-wor
 - **Cleaner listening** – skips in-text citations like “(Smith, 2019)”, “[12]” and web addresses; a pronunciation list for names and terms.
 - **Lookups** – Arabic lookups also show Levantine, Iraqi and Egyptian entries.
 - **Library** – voice check on first launch, search, rename, folders by course (adding a book while a folder is open puts it there).
+- **More ways in** – *Add a web link* fetches the page through `api/article.ts` and keeps only the article (Mozilla Readability), with redirects checked and private network addresses refused. On Android, *Share → Qari* from any app opens it with the link filled in. *Scan pages* reads photos with text recognition (Tesseract) on the device, in English, Arabic, French or German; scanned PDFs are detected and read the same way, keeping their page numbers and the original-page view. The recognizer and its language data are copied from npm into `public/ocr` at build time and served by the app itself, so nothing goes to a third party and it works offline after the first use.
 - **School tools** – select text to highlight it or add a note; each highlight keeps the PDF’s printed page number. Notes panel per book with copy-all and a Markdown download, quotes formatted as “…” (Author, p. 45). Full-text search inside a book that ignores accents, Arabic vowel marks and alif/ya variants. Page markers between paragraphs (in the margin on wide screens); tap one to see the original PDF page for tables and figures.
 - **Sync** – books, reading position, saved words and settings follow you between devices. Turn it on from the cloud button, then scan the QR code on your other device. Everything is encrypted on the device (AES-GCM, key derived from the sync code) before upload; the server stores only ciphertext in a private Vercel Blob store via `api/sync.ts`. If you read further on another device, the open book offers to jump there.
 
@@ -40,11 +41,11 @@ Push to a GitHub repo, import it in Vercel, framework preset **Vite**. For sync,
 
 - Voices are whatever the device has. Quality varies a lot: Apple “Enhanced/Premium” and Microsoft Edge “Natural” voices are good; some Android voices don’t report word timing, so the highlight is estimated from reading pace.
 - iPhone stops speech when the screen locks (the app keeps the screen awake while playing to avoid this).
-- Scanned PDFs (images of pages) need OCR, which isn’t built yet. Arabic text extracted from some PDFs can come out in the wrong order; EPUB Arabic is reliable.
+- Text recognition is good on clean print and weaker on handwriting, curved pages, poor light and large bold Arabic headings. Photos aren’t kept, so the original-page view is only for PDFs.
+- Arabic text extracted from some PDFs can come out in the wrong order; EPUB, Word and scanned Arabic are reliable.
+- Web articles behind a login or paywall can’t be fetched; use Paste text.
 
 ## Roadmap ideas
 
 2. Premium voices (pay-per-use API) as an option per language.
-3. OCR for scanned pages and photos.
 4. Better Arabic dictionary (dialect-aware, root lookup) and direct Anki deck sync.
-5. Web article import by link.
