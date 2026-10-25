@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { Readability } from '@mozilla/readability'
 import { parseHTML } from 'linkedom'
 
