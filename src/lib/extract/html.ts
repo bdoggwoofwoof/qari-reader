@@ -18,7 +18,9 @@ function isNoteRef(el: Element) {
   const type = (el.getAttribute('epub:type') || el.getAttributeNS('http://www.idpf.org/2007/ops', 'type') || el.getAttribute('role') || '').toLowerCase()
   if (/noteref|doc-noteref/.test(type)) return true
   // <sup><a href="#fn3">3</a></sup>
-  if (el.tagName.toLowerCase() === 'sup' && /^\s*[\d*†‡]+\s*$/.test(el.textContent || '')) return true
+  // <sup>3</sup>, <sup>[12]</sup>, <sup><a href="#fn3">a</a></sup>, and web citation markers like Wikipedia's.
+  if (el.tagName.toLowerCase() === 'sup' && /^\s*\[?\s*[\d*†‡a-z]{1,4}\s*\]?\s*$/i.test(el.textContent || '')) return true
+  if (/\b(reference|cite_ref|footnote-ref|noteref)\b/i.test((el.getAttribute('class') || '') + ' ' + (el.getAttribute('id') || ''))) return true
   return false
 }
 
