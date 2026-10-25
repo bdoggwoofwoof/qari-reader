@@ -17,7 +17,8 @@ A personal replacement for Speechify: read PDFs and EPUBs aloud with word-by-wor
 - **Practice** – speed per language, pause or repeat after each sentence, a repeat button, and a switch to hide Arabic vowel marks (the voice still reads them).
 - **Cleaner listening** – skips in-text citations like “(Smith, 2019)”, “[12]” and web addresses; a pronunciation list for names and terms.
 - **Lookups** – Arabic lookups also show Levantine, Iraqi and Egyptian entries.
-- **Library** – voice check on first launch, search, rename.
+- **Library** – voice check on first launch, search, rename, folders by course (adding a book while a folder is open puts it there).
+- **School tools** – select text to highlight it or add a note; each highlight keeps the PDF’s printed page number. Notes panel per book with copy-all and a Markdown download, quotes formatted as “…” (Author, p. 45). Full-text search inside a book that ignores accents, Arabic vowel marks and alif/ya variants. Page markers between paragraphs (in the margin on wide screens); tap one to see the original PDF page for tables and figures.
 - **Sync** – books, reading position, saved words and settings follow you between devices. Turn it on from the cloud button, then scan the QR code on your other device. Everything is encrypted on the device (AES-GCM, key derived from the sync code) before upload; the server stores only ciphertext in a private Vercel Blob store via `api/sync.ts`. If you read further on another device, the open book offers to jump there.
 
 Gestures: tap a word to look it up, double-tap it to read from there.

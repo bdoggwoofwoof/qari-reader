@@ -4,6 +4,8 @@ export interface Chapter {
   title: string
   blocks: string[] // paragraphs / headings, plain text
   headings?: number[] // indexes of blocks that are headings
+  pages?: string[] // printed page label(s) for each block, e.g. "45" or "45–46" (PDFs)
+  pageIdx?: number[] // 0-based PDF page index where each block starts (for "Show original page")
 }
 
 export interface Position {
@@ -25,7 +27,8 @@ export interface DocMeta {
   charCount: number
   charsBefore: number[] // cumulative char count at start of each chapter (for progress)
   progress?: number // 0..1
-  updatedAt?: number // title, language and other edits
+  folder?: string
+  updatedAt?: number // title, language, folder and other edits
   positionAt?: number // when the reading position last moved
 }
 
@@ -43,6 +46,21 @@ export interface SavedWord {
   sentence: string
   source: string
   addedAt: number
+}
+
+export interface Highlight {
+  id: string
+  docId: string
+  chapter: number
+  startBlock: number
+  start: number // char offset in startBlock
+  endBlock: number
+  end: number // char offset in endBlock (exclusive)
+  text: string
+  note: string
+  page?: string
+  createdAt: number
+  updatedAt: number
 }
 
 export interface Settings {

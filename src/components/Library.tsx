@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { go } from '../App'
-import { deleteDoc, listDocs, saveDoc, updateDocMeta } from '../lib/db'
+import { deleteDoc, listDocs, saveDoc, saveFile, updateDocMeta } from '../lib/db'
 import { useSettings } from '../lib/settings'
 import VoiceCheck from './VoiceCheck'
 import SyncSheet from './SyncSheet'
@@ -25,6 +25,8 @@ function ago(t: number) {
   return d === 1 ? 'yesterday' : `${d} days ago`
 }
 
+const NO_FOLDER = '\u0000none'
+
 export default function Library({ joinCode }: { joinCode?: string }) {
   const [docs, setDocs] = useState<DocMeta[] | null>(null)
   const [busy, setBusy] = useState<{ name: string; p: number } | null>(null)
@@ -35,6 +37,14 @@ export default function Library({ joinCode }: { joinCode?: string }) {
   const [query, setQuery] = useState('')
   const [renaming, setRenaming] = useState<DocMeta | null>(null)
   const [newTitle, setNewTitle] = useState('')
+  const [newFolder, setNewFolder] = useState('')
+  const [folder, setFolder] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('qari.folder')
+    } catch {
+      return null
+    }
+  })
   const [settings] = useSettings()
   const [addOpen, setAddOpen] = useState(false)
   const [syncOpen, setSyncOpen] = useState(!!joinCode)
@@ -57,6 +67,9 @@ export default function Library({ joinCode }: { joinCode?: string }) {
       setBusy({ name: f.name, p: 0 })
       try {
         const { meta, content } = await importFile(f, (p) => setBusy({ name: f.name, p }))
+        if (folder && folder !== NO_FOLDER) meta.folder = folder // adding while a folder is open puts the book in it
+        // Keep the original PDF so tables and figures can be seen as printed. Saved first so sync can send it along.
+        if (meta.kind === 'pdf') await saveFile(meta.id, new Blob([await f.arrayBuffer()], { type: 'application/pdf' }))
         await saveDoc(meta, content)
         lastId = meta.id
       } catch (e) {
@@ -71,6 +84,7 @@ export default function Library({ joinCode }: { joinCode?: string }) {
   const savePaste = async () => {
     if (!pasteText.trim()) return
     const { meta, content } = importText(pasteText)
+    if (folder && folder !== NO_FOLDER) meta.folder = folder
     await saveDoc(meta, content)
     setPasteText('')
     setPasteOpen(false)
@@ -85,14 +99,32 @@ export default function Library({ joinCode }: { joinCode?: string }) {
 
   const saveTitle = async () => {
     if (!renaming || !newTitle.trim()) return
-    await updateDocMeta(renaming.id, { title: newTitle.trim() })
+    await updateDocMeta(renaming.id, { title: newTitle.trim(), folder: newFolder.trim() || undefined })
     setRenaming(null)
     refresh()
   }
 
+  const pickFolder = (f: string | null) => {
+    setFolder(f)
+    try {
+      if (f) localStorage.setItem('qari.folder', f)
+      else localStorage.removeItem('qari.folder')
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const folders = [...new Set((docs || []).map((d) => d.folder).filter((f): f is string => !!f))].sort((a, b) => a.localeCompare(b))
+  const unfiled = (docs || []).some((d) => !d.folder)
+  const activeFolder = folder && (folder === NO_FOLDER ? unfiled : folders.includes(folder)) ? folder : null
+
   const empty = docs !== null && docs.length === 0
   const q = query.trim().toLocaleLowerCase()
-  const shown = (docs || []).filter((d) => !q || d.title.toLocaleLowerCase().includes(q) || (d.author || '').toLocaleLowerCase().includes(q))
+  const shown = (docs || []).filter(
+    (d) =>
+      (!activeFolder || (activeFolder === NO_FOLDER ? !d.folder : d.folder === activeFolder)) &&
+      (!q || d.title.toLocaleLowerCase().includes(q) || (d.author || '').toLocaleLowerCase().includes(q) || (d.folder || '').toLocaleLowerCase().includes(q)),
+  )
 
   return (
     <div
@@ -208,7 +240,32 @@ export default function Library({ joinCode }: { joinCode?: string }) {
             )}
           </label>
         )}
-        {docs && docs.length > 0 && q && shown.length === 0 && <p className="mt-6 text-center text-ink-2">Nothing in your library matches “{query}”.</p>}
+        {folders.length > 0 && (
+          <div className="-mx-4 mt-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0" role="group" aria-label="Folders">
+            {[
+              [null, 'All'] as const,
+              ...folders.map((f) => [f, f] as const),
+              ...(unfiled ? [[NO_FOLDER, 'No folder'] as const] : []),
+            ].map(([key, label]) => (
+              <button
+                key={key ?? 'all'}
+                type="button"
+                onClick={() => pickFolder(key)}
+                aria-pressed={activeFolder === key}
+                className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm ${activeFolder === key ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
+              >
+                {key && key !== NO_FOLDER && <Icon name="folder" size={15} className="text-moss" />}
+                {label}
+                <span className="text-xs text-ink-3 tabular-nums">
+                  {(docs || []).filter((d) => (key === null ? true : key === NO_FOLDER ? !d.folder : d.folder === key)).length}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        {docs && docs.length > 0 && shown.length === 0 && (
+          <p className="mt-6 text-center text-ink-2">{q ? `Nothing ${activeFolder && activeFolder !== NO_FOLDER ? `in ${activeFolder} ` : ''}matches “${query}”.` : 'This folder is empty.'}</p>
+        )}
 
         {shown.length > 0 && (
           <ul className="mt-4 divide-y divide-line border-y border-line">
@@ -221,6 +278,11 @@ export default function Library({ joinCode }: { joinCode?: string }) {
                       {d.title}
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-3 text-sm text-ink-3">
+                      {d.folder && !activeFolder && (
+                        <span className="inline-flex items-center gap-1 text-moss">
+                          <Icon name="folder" size={13} /> {d.folder}
+                        </span>
+                      )}
                       {d.author && <span className="truncate">{d.author}</span>}
                       <span>{LANG_NAMES[d.lang] || d.lang}</span>
                       <span>{d.kind.toUpperCase()}</span>
@@ -232,10 +294,11 @@ export default function Library({ joinCode }: { joinCode?: string }) {
                   </a>
                   <IconButton
                     icon="pencil"
-                    label={`Rename ${d.title}`}
+                    label={`Edit ${d.title}`}
                     onClick={() => {
                       setRenaming(d)
                       setNewTitle(d.title)
+                      setNewFolder(d.folder || '')
                     }}
                     className="opacity-60 group-hover:opacity-100"
                   />
@@ -285,23 +348,62 @@ export default function Library({ joinCode }: { joinCode?: string }) {
 
       <VoiceCheck open={voicesOpen} onClose={() => setVoicesOpen(false)} />
 
-      <Sheet open={!!renaming} onClose={() => setRenaming(null)} title="Rename">
+      <Sheet open={!!renaming} onClose={() => setRenaming(null)} title="Edit details">
         <form
           onSubmit={(e) => {
             e.preventDefault()
             saveTitle()
           }}
         >
+          <label htmlFor="ed-title" className="mb-1 block text-sm font-semibold">
+            Title
+          </label>
           <input
+            id="ed-title"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             dir="auto"
             autoFocus
-            aria-label="Title"
             className="h-12 w-full rounded-xl border border-line bg-paper-2 px-3 font-read text-lg outline-none focus:border-moss"
           />
-          <button type="submit" disabled={!newTitle.trim()} className="mt-3 mb-2 h-11 w-full rounded-full bg-moss font-semibold text-moss-ink disabled:opacity-40">
-            Save title
+          <label htmlFor="ed-folder" className="mt-4 mb-1 block text-sm font-semibold">
+            Folder
+          </label>
+          <input
+            id="ed-folder"
+            value={newFolder}
+            onChange={(e) => setNewFolder(e.target.value)}
+            list="folder-list"
+            dir="auto"
+            placeholder="e.g. COUN 6301, Arabic, Fun reading"
+            className="h-11 w-full rounded-xl border border-line bg-paper-2 px-3 outline-none focus:border-moss"
+          />
+          <datalist id="folder-list">
+            {folders.map((f) => (
+              <option key={f} value={f} />
+            ))}
+          </datalist>
+          {folders.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {folders.map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setNewFolder(f)}
+                  className={`h-8 rounded-full border px-3 text-sm ${newFolder === f ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
+                >
+                  {f}
+                </button>
+              ))}
+              {newFolder && (
+                <button type="button" onClick={() => setNewFolder('')} className="h-8 rounded-full px-3 text-sm text-ink-3 underline">
+                  No folder
+                </button>
+              )}
+            </div>
+          )}
+          <button type="submit" disabled={!newTitle.trim()} className="mt-4 mb-2 h-11 w-full rounded-full bg-moss font-semibold text-moss-ink disabled:opacity-40">
+            Save
           </button>
         </form>
       </Sheet>

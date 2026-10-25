@@ -60,6 +60,22 @@ export async function encryptJSON(key: CryptoKey, value: unknown): Promise<Uint8
   return out
 }
 
+/** Raw bytes (e.g. an original PDF, already compressed) → AES-GCM. Layout: [2][IV][ciphertext]. */
+export async function encryptBytes(key: CryptoKey, bytes: Uint8Array): Promise<Uint8Array> {
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes as BufferSource))
+  const out = new Uint8Array(13 + ct.length)
+  out[0] = 2
+  out.set(iv, 1)
+  out.set(ct, 13)
+  return out
+}
+
+export async function decryptBytes(key: CryptoKey, data: Uint8Array): Promise<Uint8Array> {
+  if (data[0] !== 2) throw new Error('Unknown sync data version.')
+  return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: data.slice(1, 13) }, key, data.slice(13) as BufferSource))
+}
+
 export async function decryptJSON<T>(key: CryptoKey, data: Uint8Array): Promise<T> {
   if (data[0] !== 1) throw new Error('Unknown sync data version.')
   const iv = data.slice(1, 13)

@@ -134,6 +134,68 @@ body {
 :root[data-theme='dark'] .w.now {
   color: #141a17;
 }
+/* Saved highlights: a softer stroke than the moving one, so the spoken word still stands out. */
+.hl {
+  background: color-mix(in srgb, var(--mark) 45%, transparent);
+  border-radius: 2px;
+}
+.hl-note::after {
+  content: '';
+  display: inline-block;
+  width: 0.42em;
+  height: 0.42em;
+  margin-inline-start: 0.12em;
+  vertical-align: super;
+  border-radius: 50%;
+  background: var(--moss);
+}
+.flash {
+  animation: flash 2.2s ease-out;
+}
+@keyframes flash {
+  0%,
+  40% {
+    background: var(--mark);
+    box-shadow: 0 0 0 3px var(--mark);
+  }
+}
+
+/* Printed page numbers from the PDF */
+.pg {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.4rem 0 0.6rem;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.pg::before,
+.pg::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+}
+.pg.cursor-pointer:hover span {
+  color: var(--moss);
+  text-decoration: underline;
+}
+@media (min-width: 64rem) {
+  /* On wide screens the page number sits in the margin instead of between paragraphs. */
+  .pg {
+    position: absolute;
+    right: 100%;
+    top: 0.25rem;
+    margin: 0 1.5rem 0 0;
+  }
+  .pg::before,
+  .pg::after {
+    display: none;
+  }
+}
+
 .w.picked {
   outline: 2px solid var(--moss);
   outline-offset: 1px;

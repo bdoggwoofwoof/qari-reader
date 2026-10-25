@@ -1,11 +1,17 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { go } from '../App'
-import { getDoc, savePosition, updateDocMeta } from '../lib/db'
+import { getDoc, getFile, listHighlights, onLocalChange, savePosition, saveHighlight, updateDocMeta } from '../lib/db'
+import { quoteLine } from '../lib/quotes'
+import { getSyncCode } from '../lib/sync'
+import type { SearchHit } from '../lib/search'
+import BookPanel, { type PanelTab } from './BookPanel'
+import HighlightSheet from './HighlightSheet'
+import PageViewer from './PageViewer'
 import { detectLang, isMostlyArabic, sentences, stripArabicMarks, words, type Span } from '../lib/lang'
 import { rateFor, useSettings } from '../lib/settings'
 import { speechText } from '../lib/speechText'
 import { CHARS_PER_SEC, getVoices, SAMPLES, onVoicesChanged, pickVoice, SentenceSpeaker, speechSupported, speakWord, voicesFor } from '../lib/tts'
-import { ARABIC_FONTS, LANG_NAMES, RTL_LANGS, type ArabicFont, type DocContent, type DocMeta, type Lang } from '../types'
+import { ARABIC_FONTS, LANG_NAMES, RTL_LANGS, type ArabicFont, type DocContent, type DocMeta, type Highlight, type Lang } from '../types'
 import LookupSheet, { type Picked } from './LookupSheet'
 import { Icon, IconButton, Sheet } from './ui'
 
@@ -15,11 +21,20 @@ interface BlockInfo {
   words: Span[]
 }
 
-interface Highlight {
+/** Where the voice is: the spoken sentence and word. */
+interface Spot {
   chapter: number
   block: number
   sent: number
   word: number // start offset of current word inside the block, -1 for none
+}
+
+/** Part of a saved highlight that falls inside one paragraph. */
+interface Mark {
+  id: string
+  start: number
+  end: number
+  note: boolean
 }
 
 interface Pos {
@@ -51,6 +66,8 @@ const Block = memo(function Block({
   activeWord,
   pickedStart,
   harakat,
+  marks,
+  flash,
 }: {
   text: string
   index: number
@@ -60,7 +77,10 @@ const Block = memo(function Block({
   activeWord: number
   pickedStart: number
   harakat: boolean
+  marks?: Mark[]
+  flash?: string // "start:end" of a search result to flash, or undefined
 }) {
+  const [fs, fe] = flash ? flash.split(':').map(Number) : [-1, -1]
   const rtl = RTL_LANGS.has(info.lang)
   // Vowel marks are hidden only on screen; the voice still reads the fully voweled text.
   const show = (s: string) => (harakat || !rtl ? s : stripArabicMarks(s))
@@ -73,10 +93,19 @@ const Block = memo(function Block({
     let c = s.start
     while (wi < info.words.length && info.words[wi].start < s.end) {
       const w = info.words[wi]
-      if (w.start > c) inner.push(show(text.slice(c, w.start)))
-      const cls = `w${w.start === activeWord && si === activeSent ? ' now' : ''}${w.start === pickedStart ? ' picked' : ''}`
+      if (w.start > c) {
+        const gap = show(text.slice(c, w.start))
+        // Colour the space between two words of the same highlight, so it reads as one stroke.
+        const inMark = marks?.some((k) => c > k.start && w.start < k.end)
+        inner.push(inMark ? <span key={'g' + c} className="hl">{gap}</span> : gap)
+      }
+      const m = marks?.find((k) => w.start < k.end && w.end > k.start)
+      const last = m && !info.words.some((x) => x.start > w.start && x.start < m.end)
+      const cls =
+        `w${w.start === activeWord && si === activeSent ? ' now' : ''}${w.start === pickedStart ? ' picked' : ''}` +
+        `${m ? ' hl' : ''}${m && last && m.note ? ' hl-note' : ''}${w.start < fe && w.end > fs ? ' flash' : ''}`
       inner.push(
-        <span key={w.start} className={cls} data-b={index} data-s={w.start} data-e={w.end}>
+        <span key={w.start} className={cls} data-b={index} data-s={w.start} data-e={w.end} data-h={m?.id}>
           {show(text.slice(w.start, w.end))}
         </span>,
       )
@@ -117,7 +146,16 @@ export default function Reader({ id }: { id: string }) {
   const [content, setContent] = useState<DocContent | null>(null)
   const [missing, setMissing] = useState(false)
   const [chapter, setChapter] = useState(0)
-  const [hl, setHl] = useState<Highlight>({ chapter: 0, block: 0, sent: -1, word: -1 })
+  const [hl, setHl] = useState<Spot>({ chapter: 0, block: 0, sent: -1, word: -1 })
+  const [highlights, setHighlights] = useState<Highlight[]>([])
+  const [openHl, setOpenHl] = useState<Highlight | null>(null)
+  const [selection, setSelection] = useState<{ startBlock: number; start: number; endBlock: number; end: number; text: string } | null>(null)
+  const [panelTab, setPanelTab] = useState<PanelTab>('contents')
+  const [flash, setFlash] = useState<{ chapter: number; block: number; start: number; end: number } | null>(null)
+  const [viewPage, setViewPage] = useState<{ page: number; label?: string } | null>(null)
+  const [hasOriginal, setHasOriginal] = useState(false)
+  // The original PDF is here, or can come from sync when a page is opened.
+  const canShowOriginal = !!meta && meta.kind === 'pdf' && (hasOriginal || !!getSyncCode())
   const [playing, setPlaying] = useState(false)
   const [picked, setPicked] = useState<Picked | null>(null)
   const [tocOpen, setTocOpen] = useState(false)
@@ -150,6 +188,7 @@ export default function Reader({ id }: { id: string }) {
   const saveTimer = useRef<number | null>(null)
   const tapTimer = useRef<number | null>(null)
   const lastTap = useRef<{ b: number; s: number; t: number } | null>(null)
+  const tappedWord = useRef<{ b: number; start: number; end: number } | null>(null)
   const wakeLock = useRef<{ release: () => Promise<void> } | null>(null)
   const warnedLangs = useRef(new Set<string>())
   const lastOwnSave = useRef(0) // when this device last moved the reading position
@@ -214,6 +253,97 @@ export default function Reader({ id }: { id: string }) {
     return [...set]
   }, [blockInfos, meta])
   const hasArabic = chapterLangs.some((l) => RTL_LANGS.has(l))
+
+  // ---------- Highlights ----------
+  useEffect(() => {
+    const load = () => listHighlights(id).then(setHighlights)
+    load()
+    const off = onLocalChange((k) => k === 'highlights' && load())
+    window.addEventListener('qari:synced', load)
+    getFile(id).then((f) => setHasOriginal(!!f))
+    return () => {
+      off()
+      window.removeEventListener('qari:synced', load)
+    }
+  }, [id])
+
+  // Each paragraph gets only the highlight pieces that fall inside it (stable arrays, so untouched paragraphs don't re-render).
+  const blockMarks = useMemo(() => {
+    const out: (Mark[] | undefined)[] = []
+    for (const h of highlights) {
+      if (h.chapter !== chapter) continue
+      for (let b = h.startBlock; b <= h.endBlock; b++) {
+        const len = chapterData?.blocks[b]?.length ?? 0
+        ;(out[b] ||= []).push({ id: h.id, start: b === h.startBlock ? h.start : 0, end: b === h.endBlock ? h.end : len, note: !!h.note.trim() })
+      }
+    }
+    return out
+  }, [highlights, chapter, chapterData])
+
+  // Text selected by the reader (long-press on a phone, drag on a laptop), snapped to whole words.
+  useEffect(() => {
+    const onSel = () => {
+      const sel = window.getSelection()
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return setSelection(null)
+      const range = sel.getRangeAt(0)
+      const main = document.querySelector('main.prose-read')
+      if (!main || !main.contains(range.commonAncestorContainer)) return setSelection(null)
+      const ws = [...main.querySelectorAll<HTMLElement>('.w')].filter((el) => range.intersectsNode(el))
+      if (!ws.length) return setSelection(null)
+      const a = ws[0]
+      const z = ws[ws.length - 1]
+      const startBlock = Number(a.dataset.b)
+      const endBlock = Number(z.dataset.b)
+      const start = Number(a.dataset.s)
+      const end = Number(z.dataset.e)
+      const blocks = contentRef.current?.chapters[chapter]?.blocks || []
+      const text =
+        startBlock === endBlock
+          ? blocks[startBlock].slice(start, end)
+          : [blocks[startBlock].slice(start), ...blocks.slice(startBlock + 1, endBlock), blocks[endBlock].slice(0, end)].join('\n\n')
+      setSelection({ startBlock, start, endBlock, end, text })
+    }
+    document.addEventListener('selectionchange', onSel)
+    return () => document.removeEventListener('selectionchange', onSel)
+  }, [chapter])
+
+  const makeHighlight = async (withNote: boolean) => {
+    if (!selection || !meta) return
+    const pages = chapterData?.pages
+    // Start page of the first paragraph; for a quote spanning paragraphs, the last page of the final one.
+    const p1 = pages?.[selection.startBlock]?.split('–')[0]
+    const p2 = selection.endBlock !== selection.startBlock ? pages?.[selection.endBlock]?.split('–').pop() : undefined
+    const now = Date.now()
+    const h: Highlight = {
+      id: now.toString(36) + Math.random().toString(36).slice(2, 6),
+      docId: meta.id,
+      chapter,
+      ...selection,
+      text: selection.text.trim(),
+      note: '',
+      page: p1 ? (p2 && p2 !== p1 ? `${p1}–${p2}` : p1) : undefined,
+      createdAt: now,
+      updatedAt: now,
+    }
+    await saveHighlight(h)
+    window.getSelection()?.removeAllRanges()
+    setSelection(null)
+    if (withNote) setOpenHl(h)
+  }
+
+  const copySelection = async () => {
+    if (!selection || !meta) return
+    const p = chapterData?.pages?.[selection.startBlock]
+    try {
+      await navigator.clipboard.writeText(quoteLine(meta, { text: selection.text, page: p?.split('–')[0] } as Highlight))
+      setNotice('Quote copied with its citation.')
+    } catch {
+      /* clipboard blocked */
+    }
+    window.getSelection()?.removeAllRanges()
+    setSelection(null)
+  }
+
   const blockStarts = useMemo(() => {
     const out: number[] = []
     let n = 0
@@ -590,8 +720,14 @@ export default function Reader({ id }: { id: string }) {
 
   // ---------- Tap a word: once to look it up, twice to read from there ----------
   const onTextClick = (e: MouseEvent) => {
+    const pg = (e.target as HTMLElement).closest('[data-page]') as HTMLElement | null
+    if (pg && canShowOriginal) {
+      setViewPage({ page: Number(pg.dataset.page), label: pg.dataset.label })
+      return
+    }
     const el = (e.target as HTMLElement).closest('.w') as HTMLElement | null
     if (!el || !content) return
+    if (selection && e.detail < 2) return // finishing a text selection, not a tap
     const b = Number(el.dataset.b)
     const start = Number(el.dataset.s)
     const t = Date.now()
@@ -609,6 +745,13 @@ export default function Reader({ id }: { id: string }) {
       const info = infoFor(chapter, b)
       if (!info) return
       if (playingRef.current) pause()
+      const hid = el.dataset.h
+      const h = hid ? highlights.find((x) => x.id === hid) : undefined
+      if (h) {
+        tappedWord.current = { b, start, end: Number(el.dataset.e) }
+        setOpenHl(h)
+        return
+      }
       const text = content.chapters[chapter].blocks[b]
       const sent = info.sents.find((s) => start >= s.start && start < s.end) || { start: 0, end: text.length }
       setPicked({ word: text.slice(start, Number(el.dataset.e)), lang: info.lang, sentence: text.slice(sent.start, sent.end).trim(), block: b, start })
@@ -629,6 +772,37 @@ export default function Reader({ id }: { id: string }) {
     setHl({ chapter: c, block: 0, sent: -1, word: -1 })
     persist()
     window.scrollTo({ top: 0 })
+  }
+
+  /** Moves the reading place to a spot (a search result or a highlight) and briefly flashes it. */
+  const goTo = (c: number, b: number, start: number, end: number) => {
+    pause()
+    setTocOpen(false)
+    setOpenHl(null)
+    const info = infoFor(c, b)
+    const si = Math.max(0, info?.sents.findIndex((s) => start >= s.start && start < s.end) ?? 0)
+    lastWord.current = start
+    pos.current = { chapter: c, block: b, sent: si }
+    setChapter(c)
+    setHl({ chapter: c, block: b, sent: si, word: -1 })
+    setFlash({ chapter: c, block: b, start, end })
+    userScrolledAt.current = Date.now() // don't let follow-along fight the jump
+    persist()
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => document.querySelector(`[data-b="${b}"][data-s="${start}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })),
+    )
+    setTimeout(() => setFlash(null), 2400)
+  }
+
+  const openPanel = (t: PanelTab) => {
+    setPanelTab(t)
+    setTocOpen(true)
+  }
+
+  const onHit = (h: SearchHit) => goTo(h.chapter, h.block, h.start, h.end)
+  const onPanelHighlight = (h: Highlight) => {
+    goTo(h.chapter, h.startBlock, h.start, h.startBlock === h.endBlock ? h.end : h.start + 1)
+    setOpenHl(null)
   }
 
   const setDocLang = async (lang: Lang) => {
@@ -699,7 +873,7 @@ export default function Reader({ id }: { id: string }) {
       <header className="sticky top-0 z-30 border-b border-line/70 bg-paper/90 pt-[env(safe-area-inset-top)] backdrop-blur">
         <div className="mx-auto flex h-14 max-w-3xl items-center gap-1 px-2">
           <IconButton icon="back" label="Library" onClick={() => go('')} />
-          <button type="button" onClick={() => setTocOpen(true)} className="min-w-0 flex-1 rounded-lg px-1 text-left">
+          <button type="button" onClick={() => openPanel('contents')} className="min-w-0 flex-1 rounded-lg px-1 text-left">
             <div className="truncate text-[0.95rem] font-semibold" dir="auto">
               {meta.title}
             </div>
@@ -707,8 +881,15 @@ export default function Reader({ id }: { id: string }) {
               {chapterData.title}
             </div>
           </button>
-          <IconButton icon="list" label="Contents" onClick={() => setTocOpen(true)} />
-          <IconButton icon="words" label="Saved words" onClick={() => go('words')} />
+          <IconButton icon="search" label="Search this book" onClick={() => openPanel('search')} />
+          <span className="relative">
+            <IconButton icon="list" label={highlights.length ? `Contents and ${highlights.length} notes` : 'Contents and notes'} onClick={() => openPanel(highlights.length ? 'notes' : 'contents')} />
+            {highlights.length > 0 && (
+              <span className="pointer-events-none absolute top-1.5 right-1 min-w-4 rounded-full bg-mark px-1 text-center text-[0.65rem] leading-4 font-semibold text-ink">
+                {highlights.length}
+              </span>
+            )}
+          </span>
           <IconButton icon="sliders" label="Reading settings" onClick={() => setSettingsOpen(true)} />
         </div>
       </header>
@@ -734,20 +915,45 @@ export default function Reader({ id }: { id: string }) {
         </div>
       )}
 
-      <main className="prose-read mx-auto max-w-[38rem] px-5 pt-6 pb-56" style={{ fontSize: settings.fontSize }} onClick={onTextClick}>
-        {chapterData.blocks.map((text, b) => (
-          <Block
-            key={b}
-            text={text}
-            index={b}
-            info={blockInfos[b]}
-            heading={headingSet.has(b)}
-            activeSent={hl.chapter === chapter && hl.block === b ? hl.sent : -1}
-            activeWord={hl.chapter === chapter && hl.block === b ? hl.word : -1}
-            pickedStart={picked && picked.block === b ? picked.start : -1}
-            harakat={settings.showHarakat}
-          />
-        ))}
+      <main
+        className="prose-read mx-auto max-w-[38rem] px-5 pt-6 pb-56"
+        style={{ fontSize: settings.fontSize }}
+        onClick={onTextClick}
+        onMouseDown={(e) => e.detail > 1 && e.preventDefault()} // a double-click reads from the word instead of selecting it
+      >
+        {chapterData.blocks.map((text, b) => {
+          // A page marker where a new printed page starts (PDFs), so you can cite and check the original.
+          const pi = chapterData.pageIdx?.[b]
+          const newPage = pi !== undefined && (b === 0 || chapterData.pageIdx![b - 1] !== pi)
+          const label = chapterData.pages?.[b]?.split('–')[0]
+          return (
+            <div key={b} className="relative">
+              {newPage && label && (
+                <div
+                  className={`pg select-none ${canShowOriginal ? 'cursor-pointer' : ''}`}
+                  data-page={pi}
+                  data-label={label}
+                  title={canShowOriginal ? 'Show the original page' : undefined}
+                  aria-label={`Page ${label}`}
+                >
+                  <span>p. {label}</span>
+                </div>
+              )}
+              <Block
+                text={text}
+                index={b}
+                info={blockInfos[b]}
+                heading={headingSet.has(b)}
+                activeSent={hl.chapter === chapter && hl.block === b ? hl.sent : -1}
+                activeWord={hl.chapter === chapter && hl.block === b ? hl.word : -1}
+                pickedStart={picked && picked.block === b ? picked.start : -1}
+                harakat={settings.showHarakat}
+                marks={blockMarks[b]}
+                flash={flash && flash.chapter === chapter && flash.block === b ? `${flash.start}:${flash.end}` : undefined}
+              />
+            </div>
+          )
+        })}
         <div className="mt-12 flex justify-between gap-3 font-ui text-sm">
           <button type="button" disabled={chapter === 0} onClick={() => goChapter(chapter - 1)} className="rounded-full border border-line px-4 py-2 disabled:opacity-30">
             Previous section
@@ -760,7 +966,37 @@ export default function Reader({ id }: { id: string }) {
 
       {/* Player */}
       <div className="safe-b fixed inset-x-0 bottom-0 z-30 px-3 pt-2">
-        {away && (
+        {selection && (
+          <div className="mb-2 flex justify-center">
+            <div className="sheet-in flex items-center gap-1 rounded-full border border-line bg-paper p-1 shadow-[0_4px_18px_rgb(0_0_0/0.14)]" role="toolbar" aria-label="Selected text">
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => makeHighlight(false)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-mark px-3.5 text-sm font-semibold text-ink"
+              >
+                <Icon name="highlight" size={16} /> Highlight
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => makeHighlight(true)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-paper-2"
+              >
+                <Icon name="note" size={16} /> Add note
+              </button>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={copySelection}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-sm hover:bg-paper-2"
+              >
+                <Icon name="paste" size={16} /> Copy quote
+              </button>
+            </div>
+          </div>
+        )}
+        {away && !selection && (
           <div className="mb-2 flex justify-center">
             <button
               type="button"
@@ -836,22 +1072,19 @@ export default function Reader({ id }: { id: string }) {
         </div>
       </div>
 
-      <Sheet open={tocOpen} onClose={() => setTocOpen(false)} title="Contents" wide>
-        <ol className="-mx-2">
-          {content.chapters.map((c, i) => (
-            <li key={i}>
-              <button
-                type="button"
-                onClick={() => goChapter(i)}
-                dir="auto"
-                className={`w-full rounded-lg px-2 py-2.5 text-left font-read hover:bg-paper-2 ${i === chapter ? 'bg-wash font-semibold' : ''}`}
-              >
-                {c.title}
-              </button>
-            </li>
-          ))}
-        </ol>
-      </Sheet>
+      <BookPanel
+        open={tocOpen}
+        tab={panelTab}
+        onTab={setPanelTab}
+        onClose={() => setTocOpen(false)}
+        meta={meta}
+        content={content}
+        chapter={chapter}
+        highlights={highlights}
+        onChapter={goChapter}
+        onHighlight={onPanelHighlight}
+        onHit={onHit}
+      />
 
       <Sheet open={sleepOpen} onClose={() => setSleepOpen(false)} title="Sleep timer">
         <div className="grid grid-cols-2 gap-2 pb-2">
@@ -1111,6 +1344,34 @@ export default function Reader({ id }: { id: string }) {
         onClose={() => setPicked(null)}
         onReadFromHere={readFromHere}
       />
+
+      <HighlightSheet
+        highlight={openHl}
+        meta={meta}
+        onClose={() => setOpenHl(null)}
+        canShowPage={canShowOriginal && chapterData.pageIdx !== undefined}
+        onShowPage={() => {
+          const h = openHl
+          if (!h) return
+          setOpenHl(null)
+          setViewPage({ page: content.chapters[h.chapter]?.pageIdx?.[h.startBlock] ?? 0, label: h.page?.split('–')[0] })
+        }}
+        onLookUp={() => {
+          const h = openHl
+          if (!h) return
+          setOpenHl(null)
+          // The word that was tapped to open this highlight, or else its first word.
+          const t = tappedWord.current
+          const b = t && t.b >= h.startBlock && t.b <= h.endBlock ? t.b : h.startBlock
+          const info = infoFor(h.chapter, b)
+          const text = content.chapters[h.chapter].blocks[b]
+          const w = (t && t.b === b ? t : null) || info?.words.find((x) => x.start >= h.start) || { start: h.start, end: h.start + 1 }
+          const sent = info?.sents.find((s) => w.start >= s.start && w.start < s.end) || { start: 0, end: text.length }
+          setPicked({ word: text.slice(w.start, w.end), lang: info?.lang || meta.lang, sentence: text.slice(sent.start, sent.end).trim(), block: b, start: w.start })
+        }}
+      />
+
+      {viewPage && <PageViewer docId={meta.id} page={viewPage.page} label={viewPage.label} onClose={() => setViewPage(null)} />}
     </div>
   )
 }

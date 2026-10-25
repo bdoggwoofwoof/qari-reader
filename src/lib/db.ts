@@ -1,22 +1,37 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
-import type { DocContent, DocMeta, Position, SavedWord } from '../types'
+import type { DocContent, DocMeta, Highlight, Position, SavedWord } from '../types'
+
+export interface StoredFile {
+  id: string // the doc id
+  type: string
+  data: Blob
+}
 
 interface QariDB extends DBSchema {
   docs: { key: string; value: DocMeta }
   content: { key: string; value: DocContent }
   words: { key: string; value: SavedWord; indexes: { byAdded: number } }
+  highlights: { key: string; value: Highlight; indexes: { byDoc: string } }
+  files: { key: string; value: StoredFile }
 }
 
 let dbPromise: Promise<IDBPDatabase<QariDB>> | null = null
 
 function db() {
   if (!dbPromise) {
-    dbPromise = openDB<QariDB>('qari', 1, {
-      upgrade(d) {
-        d.createObjectStore('docs', { keyPath: 'id' })
-        d.createObjectStore('content', { keyPath: 'id' })
-        const w = d.createObjectStore('words', { keyPath: 'id' })
-        w.createIndex('byAdded', 'addedAt')
+    dbPromise = openDB<QariDB>('qari', 2, {
+      upgrade(d, oldVersion) {
+        if (oldVersion < 1) {
+          d.createObjectStore('docs', { keyPath: 'id' })
+          d.createObjectStore('content', { keyPath: 'id' })
+          const w = d.createObjectStore('words', { keyPath: 'id' })
+          w.createIndex('byAdded', 'addedAt')
+        }
+        if (oldVersion < 2) {
+          const h = d.createObjectStore('highlights', { keyPath: 'id' })
+          h.createIndex('byDoc', 'docId')
+          d.createObjectStore('files', { keyPath: 'id' })
+        }
       },
     })
   }
@@ -25,7 +40,7 @@ function db() {
 
 // ---------- Change notifications (sync listens to these) ----------
 
-type ChangeKind = 'docs' | 'words' | 'position' | 'opened'
+type ChangeKind = 'docs' | 'words' | 'position' | 'opened' | 'highlights'
 const changeListeners = new Set<(k: ChangeKind) => void>()
 export function onLocalChange(cb: (k: ChangeKind) => void) {
   changeListeners.add(cb)
@@ -40,12 +55,13 @@ const TOMB_KEY = 'qari.tombstones'
 export interface Tombstones {
   docs: Record<string, number>
   words: Record<string, number>
+  highlights: Record<string, number>
 }
 export function loadTombstones(): Tombstones {
   try {
-    return { docs: {}, words: {}, ...JSON.parse(localStorage.getItem(TOMB_KEY) || '{}') }
+    return { docs: {}, words: {}, highlights: {}, ...JSON.parse(localStorage.getItem(TOMB_KEY) || '{}') }
   } catch {
-    return { docs: {}, words: {} }
+    return { docs: {}, words: {}, highlights: {} }
   }
 }
 export function saveTombstones(t: Tombstones) {
@@ -55,7 +71,7 @@ export function saveTombstones(t: Tombstones) {
     /* storage unavailable */
   }
 }
-function tombstone(kind: 'docs' | 'words', id: string) {
+function tombstone(kind: keyof Tombstones, id: string) {
   const t = loadTombstones()
   t[kind][id] = Date.now()
   saveTombstones(t)
@@ -113,11 +129,49 @@ export async function savePosition(id: string, position: Position, progress?: nu
 
 export async function deleteDoc(id: string, opts: { fromSync?: boolean } = {}) {
   const d = await db()
-  const tx = d.transaction(['docs', 'content'], 'readwrite')
-  await Promise.all([tx.objectStore('docs').delete(id), tx.objectStore('content').delete(id), tx.done])
+  const hls = await d.getAllKeysFromIndex('highlights', 'byDoc', id)
+  const tx = d.transaction(['docs', 'content', 'files', 'highlights'], 'readwrite')
+  await Promise.all([
+    tx.objectStore('docs').delete(id),
+    tx.objectStore('content').delete(id),
+    tx.objectStore('files').delete(id),
+    ...hls.map((k) => tx.objectStore('highlights').delete(k)),
+    tx.done,
+  ])
   if (!opts.fromSync) {
     tombstone('docs', id)
     changed('docs')
+  }
+}
+
+// ---------- Original files (for "Show original page") ----------
+
+export async function saveFile(id: string, data: Blob) {
+  await (await db()).put('files', { id, type: data.type, data })
+}
+
+export async function getFile(id: string) {
+  return (await db()).get('files', id)
+}
+
+// ---------- Highlights and notes ----------
+
+export async function listHighlights(docId?: string): Promise<Highlight[]> {
+  const d = await db()
+  const all = docId ? await d.getAllFromIndex('highlights', 'byDoc', docId) : await d.getAll('highlights')
+  return all.sort((a, b) => a.chapter - b.chapter || a.startBlock - b.startBlock || a.start - b.start)
+}
+
+export async function saveHighlight(h: Highlight, opts: { fromSync?: boolean } = {}) {
+  await (await db()).put('highlights', h)
+  if (!opts.fromSync) changed('highlights')
+}
+
+export async function deleteHighlight(id: string, opts: { fromSync?: boolean } = {}) {
+  await (await db()).delete('highlights', id)
+  if (!opts.fromSync) {
+    tombstone('highlights', id)
+    changed('highlights')
   }
 }
 

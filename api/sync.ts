@@ -10,7 +10,7 @@ import { BlobPreconditionFailedError, get, put } from '@vercel/blob'
  */
 
 const SPACE = /^[0-9a-f]{64}$/
-const FILE = /^(manifest|c-[a-z0-9]{4,40}-\d{1,3})$/
+const FILE = /^(manifest|[cf]-[a-z0-9]{4,40}-\d{1,3})$/ // c- = book text, f- = original file
 const MAX_BYTES = 4 * 1024 * 1024 // Vercel Functions accept request bodies up to 4.5 MB
 
 function bad(status: number, message: string) {

@@ -112,6 +112,7 @@ interface Block {
   text: string
   heading: boolean
   page: number
+  pageEnd?: number // set when a paragraph runs onto the next page
 }
 
 function pageBlocks(p: PageLines, pageIndex: number, isNoise: (l: Line, p: PageLines) => boolean, bodySize: number, docGap: number): Block[] {
@@ -182,6 +183,12 @@ async function outlineChapters(doc: pdfjs.PDFDocumentProxy): Promise<{ title: st
   }
 }
 
+/** Opens a PDF for viewing pages (the worker is already configured above). */
+export async function openPdf(data: ArrayBuffer) {
+  const task = pdfjs.getDocument({ data: new Uint8Array(data) })
+  return { doc: await task.promise, close: () => task.destroy() }
+}
+
 export async function extractPdf(data: ArrayBuffer, onProgress?: (p: number) => void): Promise<Extracted> {
   const task = pdfjs.getDocument({ data: new Uint8Array(data) })
   const doc = await task.promise
@@ -222,10 +229,27 @@ export async function extractPdf(data: ArrayBuffer, onProgress?: (p: number) => 
       // A paragraph that runs over a page break: join it back together.
       if (prev && b.page !== prev.page && !prev.heading && !b.heading && !/[.!?:"”؟]$/.test(prev.text) && /^[a-zà-ÿ(,;]/.test(b.text)) {
         prev.text = /[A-Za-z]-$/.test(prev.text) ? prev.text.slice(0, -1) + b.text : prev.text + ' ' + b.text
+        prev.pageEnd = b.page
       } else {
         blocks.push(b)
       }
     }
+  })
+
+  // Printed page numbers ("xii", "45") when the PDF defines them, so highlights cite the page you'd quote.
+  let labels: string[] | null = null
+  try {
+    labels = await doc.getPageLabels()
+  } catch {
+    labels = null
+  }
+  const label = (i: number) => labels?.[i]?.trim() || String(i + 1)
+  const toChapter = (title: string, bs: Block[]): Chapter => ({
+    title,
+    blocks: bs.map((b) => b.text),
+    headings: bs.flatMap((b, i) => (b.heading ? [i] : [])),
+    pages: bs.map((b) => (b.pageEnd !== undefined && b.pageEnd !== b.page ? `${label(b.page)}–${label(b.pageEnd)}` : label(b.page))),
+    pageIdx: bs.map((b) => b.page),
   })
 
   // Split into chapters: the PDF's own outline, else its headings, else groups of ten pages.
@@ -239,11 +263,7 @@ export async function extractPdf(data: ArrayBuffer, onProgress?: (p: number) => 
       const bs = blocks.slice(st, starts[k + 1] ?? blocks.length)
       let t = 0
       while (bs[t + 1]?.heading) t++
-      return {
-        title: bs[0].heading ? bs[t].text.slice(0, 120) : 'Beginning',
-        blocks: bs.map((b) => b.text),
-        headings: bs.flatMap((b, i) => (b.heading ? [i] : [])),
-      }
+      return toChapter(bs[0].heading ? bs[t].text.slice(0, 120) : 'Beginning', bs)
     })
     return finishMeta(doc, task, chapters)
   }
@@ -251,7 +271,7 @@ export async function extractPdf(data: ArrayBuffer, onProgress?: (p: number) => 
     outline.length > 0
       ? outline.map((o, i) => ({ title: o.title, from: i === 0 ? 0 : o.page, to: outline[i + 1]?.page ?? Infinity }))
       : Array.from({ length: Math.ceil(doc.numPages / 10) }, (_, i) => ({
-          title: `Pages ${i * 10 + 1}–${Math.min((i + 1) * 10, doc.numPages)}`,
+          title: `Pages ${label(i * 10)}–${label(Math.min((i + 1) * 10, doc.numPages) - 1)}`,
           from: i * 10,
           to: (i + 1) * 10,
         }))
@@ -259,11 +279,7 @@ export async function extractPdf(data: ArrayBuffer, onProgress?: (p: number) => 
   const chapters: Chapter[] = bounds
     .map((bd) => {
       const bs = blocks.filter((b) => b.page >= bd.from && b.page < bd.to)
-      return {
-        title: bd.title,
-        blocks: bs.map((b) => b.text),
-        headings: bs.flatMap((b, i) => (b.heading ? [i] : [])),
-      }
+      return toChapter(bd.title, bs)
     })
     .filter((c) => c.blocks.length > 0)
 

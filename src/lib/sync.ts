@@ -1,27 +1,49 @@
 import { useEffect, useState } from 'react'
-import type { DocContent, DocMeta, SavedWord } from '../types'
-import { deleteDoc, deleteWord, getContent, listDocs, listWords, loadTombstones, onLocalChange, putDocMeta, saveDoc, saveTombstones, saveWord } from './db'
+import type { DocContent, DocMeta, Highlight, SavedWord } from '../types'
+import {
+  deleteDoc,
+  deleteHighlight,
+  deleteWord,
+  getContent,
+  getFile as getStoredFile,
+  listDocs,
+  listHighlights,
+  listWords,
+  loadTombstones,
+  onLocalChange,
+  putDocMeta,
+  saveDoc,
+  saveFile,
+  saveHighlight,
+  saveTombstones,
+  saveWord,
+} from './db'
 import { applySyncedSettings, onSettingsChange, syncedSettings, type SyncedSettings } from './settings'
-import { decryptJSON, deriveKeys, encryptJSON, type SyncKeys } from './syncCrypto'
+import { decryptBytes, decryptJSON, deriveKeys, encryptBytes, encryptJSON, type SyncKeys } from './syncCrypto'
 
 // ---------- What's stored remotely ----------
 
 interface RemoteDoc {
   meta: DocMeta
   chunks: number // the book's text, encrypted, in this many files
+  fileChunks?: number // the original PDF, if uploaded; downloaded only when a page is viewed
+  fileType?: string
 }
 
 interface Manifest {
   v: 1
   docs: Record<string, RemoteDoc>
   words: Record<string, SavedWord>
+  highlights: Record<string, Highlight>
   deletedDocs: Record<string, number>
   deletedWords: Record<string, number>
+  deletedHighlights: Record<string, number>
   settings?: SyncedSettings
 }
 
-const EMPTY: Manifest = { v: 1, docs: {}, words: {}, deletedDocs: {}, deletedWords: {} }
+const EMPTY: Manifest = { v: 1, docs: {}, words: {}, highlights: {}, deletedDocs: {}, deletedWords: {}, deletedHighlights: {} }
 const CHUNK = 3_500_000 // stays under the 4.5 MB request limit of Vercel Functions
+const MAX_ORIGINAL = 60 * 1024 * 1024 // originals larger than this stay on the device they were added on
 const TOMB_DAYS = 120
 
 // ---------- Status ----------
@@ -137,6 +159,17 @@ function concat(parts: Uint8Array[]) {
 let keys: SyncKeys | null = null
 let running = false
 let again = false
+let lastManifest: Manifest | null = null
+
+/** Uploads a book's original PDF (encrypted) if this device has it. */
+async function uploadOriginal(k: SyncKeys, id: string): Promise<Pick<RemoteDoc, 'fileChunks' | 'fileType'>> {
+  const file = await getStoredFile(id)
+  if (!file || file.data.size > MAX_ORIGINAL) return {}
+  const bytes = await encryptBytes(k.key, new Uint8Array(await file.data.arrayBuffer()))
+  const n = Math.max(1, Math.ceil(bytes.length / CHUNK))
+  for (let i = 0; i < n; i++) await putFile(k.space, `f-${id}-${i}`, bytes.slice(i * CHUNK, (i + 1) * CHUNK))
+  return { fileChunks: n, fileType: file.type }
+}
 
 async function syncOnce(k: SyncKeys): Promise<{ changedLocal: boolean }> {
   let changedLocal = false
@@ -146,6 +179,7 @@ async function syncOnce(k: SyncKeys): Promise<{ changedLocal: boolean }> {
     const tomb = loadTombstones()
     const deletedDocs = maxMerge(remote.deletedDocs, tomb.docs)
     const deletedWords = maxMerge(remote.deletedWords, tomb.words)
+    const deletedHighlights = maxMerge(remote.deletedHighlights, tomb.highlights)
 
     // Books
     const localDocs = new Map((await listDocs()).map((d) => [d.id, d]))
@@ -167,14 +201,14 @@ async function syncOnce(k: SyncKeys): Promise<{ changedLocal: boolean }> {
           await putDocMeta(merged)
           changedLocal = true
         }
-        docs[id] = { meta: merged, chunks: r.chunks }
+        docs[id] = { ...r, meta: merged, ...(r.fileChunks ? {} : await uploadOriginal(k, id)) }
       } else if (l) {
         const content = await getContent(id)
         if (!content) continue
         const bytes = await encryptJSON(k.key, content)
         const n = Math.max(1, Math.ceil(bytes.length / CHUNK))
         for (let i = 0; i < n; i++) await putFile(k.space, `c-${id}-${i}`, bytes.slice(i * CHUNK, (i + 1) * CHUNK))
-        docs[id] = { meta: l, chunks: n }
+        docs[id] = { meta: l, chunks: n, ...(await uploadOriginal(k, id)) }
       } else if (r) {
         const parts = await Promise.all(Array.from({ length: r.chunks }, (_, i) => getFile(k.space, `c-${id}-${i}`)))
         if (parts.some((p) => !p)) {
@@ -207,6 +241,27 @@ async function syncOnce(k: SyncKeys): Promise<{ changedLocal: boolean }> {
       words[id] = w
     }
 
+    // Highlights and notes: newest edit wins; a later deletion wins over an older edit.
+    const localHl = new Map((await listHighlights()).map((h) => [h.id, h]))
+    const highlights: Record<string, Highlight> = {}
+    for (const id of new Set([...localHl.keys(), ...Object.keys(remote.highlights)])) {
+      const l = localHl.get(id)
+      const r = remote.highlights[id]
+      const h = l && r ? (newer(r.updatedAt, l.updatedAt) ? r : l) : (l || r)!
+      if (!docs[h.docId] || (deletedHighlights[id] && deletedHighlights[id] >= h.updatedAt)) {
+        if (l) {
+          await deleteHighlight(id, { fromSync: true })
+          changedLocal = true
+        }
+        continue
+      }
+      if (h !== l) {
+        await saveHighlight(h, { fromSync: true })
+        changedLocal = true
+      }
+      highlights[id] = h
+    }
+
     // Settings: the most recently changed device wins.
     const mine = syncedSettings()
     let settings = mine
@@ -215,12 +270,16 @@ async function syncOnce(k: SyncKeys): Promise<{ changedLocal: boolean }> {
       settings = remote.settings
     }
 
-    saveTombstones({ docs: deletedDocs, words: deletedWords })
-    const next: Manifest = { v: 1, docs, words, deletedDocs, deletedWords, settings }
+    saveTombstones({ docs: deletedDocs, words: deletedWords, highlights: deletedHighlights })
+    const next: Manifest = { v: 1, docs, words, highlights, deletedDocs, deletedWords, deletedHighlights, settings }
     const strip = (m: Manifest) => JSON.stringify({ ...m, v: 1 })
-    if (remoteFile && strip(next) === strip(remote)) return { changedLocal }
+    if (remoteFile && strip(next) === strip(remote)) {
+      lastManifest = next
+      return { changedLocal }
+    }
     try {
       await putFile(k.space, 'manifest', await encryptJSON(k.key, next), remoteFile?.etag)
+      lastManifest = next
       return { changedLocal }
     } catch (e) {
       if (e instanceof HttpError && e.status === 412) continue // another device saved first: merge again
@@ -228,6 +287,30 @@ async function syncOnce(k: SyncKeys): Promise<{ changedLocal: boolean }> {
     }
   }
   throw new Error('Another device kept changing the library; try again in a moment.')
+}
+
+/** Downloads a book's original PDF from sync (only when someone opens a page), and keeps it on this device. */
+export async function fetchOriginal(docId: string): Promise<Blob | null> {
+  if (!keys || !navigator.onLine) return null
+  try {
+    let m = lastManifest
+    if (!m?.docs[docId]?.fileChunks) {
+      const f = await getFile(keys.space, 'manifest')
+      if (!f) return null
+      m = { ...EMPTY, ...(await decryptJSON<Manifest>(keys.key, f.data)) }
+    }
+    const r = m.docs[docId]
+    if (!r?.fileChunks) return null
+    const k = keys
+    const parts = await Promise.all(Array.from({ length: r.fileChunks }, (_, i) => getFile(k.space, `f-${docId}-${i}`)))
+    if (parts.some((p) => !p)) return null
+    const bytes = await decryptBytes(k.key, concat(parts.map((p) => p!.data)))
+    const blob = new Blob([bytes as BlobPart], { type: r.fileType || 'application/pdf' })
+    await saveFile(docId, blob)
+    return blob
+  } catch {
+    return null
+  }
 }
 
 export async function syncNow(): Promise<void> {
