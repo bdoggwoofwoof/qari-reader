@@ -25,6 +25,8 @@ export interface DocMeta {
   charCount: number
   charsBefore: number[] // cumulative char count at start of each chapter (for progress)
   progress?: number // 0..1
+  updatedAt?: number // title, language and other edits
+  positionAt?: number // when the reading position last moved
 }
 
 export interface DocContent {
@@ -56,6 +58,7 @@ export interface Settings {
   skipCitations: boolean
   pronunciations: Pronunciation[]
   voiceCheckDone: boolean
+  updatedAt?: number // when a synced setting last changed
 }
 
 export interface Pronunciation {

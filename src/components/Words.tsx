@@ -26,7 +26,10 @@ export default function Words() {
   const [settings] = useSettings()
 
   useEffect(() => {
-    listWords().then(setList)
+    const load = () => listWords().then(setList)
+    load()
+    window.addEventListener('qari:synced', load)
+    return () => window.removeEventListener('qari:synced', load)
   }, [])
 
   const langs = useMemo(() => [...new Set((list || []).map((w) => w.lang))], [list])

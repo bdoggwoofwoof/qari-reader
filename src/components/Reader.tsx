@@ -152,6 +152,8 @@ export default function Reader({ id }: { id: string }) {
   const lastTap = useRef<{ b: number; s: number; t: number } | null>(null)
   const wakeLock = useRef<{ release: () => Promise<void> } | null>(null)
   const warnedLangs = useRef(new Set<string>())
+  const lastOwnSave = useRef(0) // when this device last moved the reading position
+  const [elsewhere, setElsewhere] = useState<DocMeta['position'] | null>(null)
 
   const setSleep = (s: Sleep) => {
     sleepRef.current = s
@@ -164,12 +166,13 @@ export default function Reader({ id }: { id: string }) {
       if (!d) return setMissing(true)
       setMeta(d.meta)
       setContent(d.content)
+      lastOwnSave.current = d.meta.positionAt ?? d.meta.addedAt
       const p = d.meta.position
       const ch = Math.min(p.chapter, d.content.chapters.length - 1)
       setChapter(ch)
       pos.current = { chapter: ch, block: p.block, sent: 0 }
       setHl({ chapter: ch, block: p.block, sent: -1, word: -1 })
-      updateDocMeta(id, { openedAt: Date.now() })
+      updateDocMeta(id, { openedAt: Date.now() }, 'opened')
       requestAnimationFrame(() => {
         document.querySelector(`[data-block="${p.block}"]`)?.scrollIntoView({ block: 'start' })
         window.scrollBy(0, -80)
@@ -229,6 +232,7 @@ export default function Reader({ id }: { id: string }) {
       const m = metaRef.current
       const doc = contentRef.current
       if (!m || !doc) return
+      lastOwnSave.current = Date.now()
       const { chapter: c, block: b } = pos.current
       const inChapter = doc.chapters[c].blocks.slice(0, b).reduce((n, t) => n + t.length, 0)
       const progress = m.charCount ? Math.min(1, ((m.charsBefore[c] ?? 0) + inChapter) / m.charCount) : 0
@@ -528,6 +532,36 @@ export default function Reader({ id }: { id: string }) {
     } else scrollToActive()
   }
 
+  // ---------- Reading on another device ----------
+  useEffect(() => {
+    const onSynced = async () => {
+      const d = await getDoc(id)
+      if (!d) return
+      contentRef.current = d.content
+      const p = d.meta.position
+      const cur = pos.current
+      if ((d.meta.positionAt ?? 0) > lastOwnSave.current + 500 && !playingRef.current && (p.chapter !== cur.chapter || Math.abs(p.block - cur.block) > 1)) {
+        setElsewhere(p)
+      }
+    }
+    window.addEventListener('qari:synced', onSynced)
+    return () => window.removeEventListener('qari:synced', onSynced)
+  }, [id])
+
+  const goElsewhere = () => {
+    if (!elsewhere) return
+    const p = elsewhere
+    setElsewhere(null)
+    pos.current = { chapter: p.chapter, block: p.block, sent: 0 }
+    lastWord.current = null
+    setChapter(p.chapter)
+    setHl({ chapter: p.chapter, block: p.block, sent: 0, word: -1 })
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-block="${p.block}"]`)?.scrollIntoView({ block: 'center' })
+    })
+    persist()
+  }
+
   // ---------- Keyboard & lock-screen controls ----------
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
@@ -684,6 +718,18 @@ export default function Reader({ id }: { id: string }) {
           <span className="flex-1">{notice}</span>
           <button type="button" className="shrink-0 text-ink-3 underline" onClick={() => setNotice(null)}>
             OK
+          </button>
+        </div>
+      )}
+
+      {elsewhere && (
+        <div className="mx-auto mt-3 flex max-w-[38rem] items-center gap-3 rounded-xl border border-moss/50 bg-wash px-4 py-3 text-sm" role="status">
+          <span className="flex-1">You read further on another device{content.chapters[elsewhere.chapter] ? `, in “${content.chapters[elsewhere.chapter].title}”` : ''}.</span>
+          <button type="button" className="shrink-0 font-semibold text-moss underline" onClick={goElsewhere}>
+            Go there
+          </button>
+          <button type="button" className="shrink-0 text-ink-3" onClick={() => setElsewhere(null)} aria-label="Stay here">
+            <Icon name="close" size={16} />
           </button>
         </div>
       )}

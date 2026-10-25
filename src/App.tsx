@@ -39,5 +39,6 @@ export default function App() {
 
   if (route[0] === 'read' && route[1]) return <Reader key={route[1]} id={route[1]} />
   if (route[0] === 'words') return <Words />
+  if (route[0] === 'sync' && route[1]) return <Library key="join" joinCode={route[1].toUpperCase()} />
   return <Library />
 }

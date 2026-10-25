@@ -18,6 +18,7 @@ A personal replacement for Speechify: read PDFs and EPUBs aloud with word-by-wor
 - **Cleaner listening** – skips in-text citations like “(Smith, 2019)”, “[12]” and web addresses; a pronunciation list for names and terms.
 - **Lookups** – Arabic lookups also show Levantine, Iraqi and Egyptian entries.
 - **Library** – voice check on first launch, search, rename.
+- **Sync** – books, reading position, saved words and settings follow you between devices. Turn it on from the cloud button, then scan the QR code on your other device. Everything is encrypted on the device (AES-GCM, key derived from the sync code) before upload; the server stores only ciphertext in a private Vercel Blob store via `api/sync.ts`. If you read further on another device, the open book offers to jump there.
 
 Gestures: tap a word to look it up, double-tap it to read from there.
 Keyboard: Space = play/pause, ← / → = previous / next sentence, R = repeat sentence.
@@ -32,18 +33,16 @@ npm run build    # production build in dist/
 
 ## Deploy (Vercel)
 
-Push to a GitHub repo, import it in Vercel, framework preset **Vite**. No environment variables needed.
+Push to a GitHub repo, import it in Vercel, framework preset **Vite**. For sync, connect a **private** Blob store to the project (Storage › Create › Blob); Vercel adds `BLOB_READ_WRITE_TOKEN` automatically. Without it the app works, and sync shows that storage isn't set up.
 
 ## Known limits
 
 - Voices are whatever the device has. Quality varies a lot: Apple “Enhanced/Premium” and Microsoft Edge “Natural” voices are good; some Android voices don’t report word timing, so the highlight is estimated from reading pace.
 - iPhone stops speech when the screen locks (the app keeps the screen awake while playing to avoid this).
 - Scanned PDFs (images of pages) need OCR, which isn’t built yet. Arabic text extracted from some PDFs can come out in the wrong order; EPUB Arabic is reliable.
-- Library and saved words live on each device separately; sync between phone and laptop is a planned next step.
 
 ## Roadmap ideas
 
-1. Sync library, position and saved words across devices.
 2. Premium voices (pay-per-use API) as an option per language.
 3. OCR for scanned pages and photos.
 4. Better Arabic dictionary (dialect-aware, root lookup) and direct Anki deck sync.

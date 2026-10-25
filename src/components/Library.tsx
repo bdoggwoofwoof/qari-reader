@@ -3,6 +3,8 @@ import { go } from '../App'
 import { deleteDoc, listDocs, saveDoc, updateDocMeta } from '../lib/db'
 import { useSettings } from '../lib/settings'
 import VoiceCheck from './VoiceCheck'
+import SyncSheet from './SyncSheet'
+import { useSyncStatus } from '../lib/sync'
 import { importFile, importText } from '../lib/importer'
 import { LANG_NAMES, type DocMeta } from '../types'
 import { Icon, IconButton, Sheet } from './ui'
@@ -23,7 +25,7 @@ function ago(t: number) {
   return d === 1 ? 'yesterday' : `${d} days ago`
 }
 
-export default function Library() {
+export default function Library({ joinCode }: { joinCode?: string }) {
   const [docs, setDocs] = useState<DocMeta[] | null>(null)
   const [busy, setBusy] = useState<{ name: string; p: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -34,12 +36,17 @@ export default function Library() {
   const [renaming, setRenaming] = useState<DocMeta | null>(null)
   const [newTitle, setNewTitle] = useState('')
   const [settings] = useSettings()
-  const [voicesOpen, setVoicesOpen] = useState(!settings.voiceCheckDone)
+  const [addOpen, setAddOpen] = useState(false)
+  const [syncOpen, setSyncOpen] = useState(!!joinCode)
+  const [voicesOpen, setVoicesOpen] = useState(!settings.voiceCheckDone && !joinCode)
+  const sync = useSyncStatus()
   const input = useRef<HTMLInputElement>(null)
 
   const refresh = useCallback(() => listDocs().then(setDocs), [])
   useEffect(() => {
     refresh()
+    window.addEventListener('qari:synced', refresh)
+    return () => window.removeEventListener('qari:synced', refresh)
   }, [refresh])
 
   const handleFiles = async (files: FileList | File[]) => {
@@ -109,12 +116,25 @@ export default function Library() {
           <h1 className="text-lg font-semibold tracking-tight">Qari</h1>
         </div>
         <div className="flex items-center gap-1">
+          <span className="relative">
+            <IconButton
+              icon="cloud"
+              label={sync.state === 'off' ? 'Sync between devices' : `Sync: ${sync.state === 'error' ? 'needs attention' : sync.state}`}
+              onClick={() => setSyncOpen(true)}
+              className={sync.state === 'off' ? '' : 'text-moss'}
+            />
+            {sync.state !== 'off' && (
+              <span
+                className={`pointer-events-none absolute top-2.5 right-2.5 h-2 w-2 rounded-full ring-2 ring-paper ${sync.state === 'error' ? 'bg-danger' : sync.state === 'syncing' ? 'animate-pulse bg-mark' : sync.state === 'offline' ? 'bg-ink-3' : 'bg-moss'}`}
+                aria-hidden="true"
+              />
+            )}
+          </span>
           <IconButton icon="speaker" label="Voices on this device" onClick={() => setVoicesOpen(true)} />
           <IconButton icon="words" label="Saved words" onClick={() => go('words')} />
-          <IconButton icon="paste" label="Paste text" onClick={() => setPasteOpen(true)} />
           <button
             type="button"
-            onClick={() => input.current?.click()}
+            onClick={() => setAddOpen(true)}
             className="ml-1 inline-flex h-10 items-center gap-1.5 rounded-full bg-moss px-4 text-sm font-semibold text-moss-ink hover:opacity-90"
           >
             <Icon name="plus" size={18} /> Add
@@ -164,7 +184,9 @@ export default function Library() {
               اقرأ
             </span>
             <span className="mt-4 font-read text-2xl">Add something to read</span>
-            <span className="mt-2 max-w-sm text-ink-2">Choose a PDF or EPUB, or drop it here. It stays on this device.</span>
+            <span className="mt-2 max-w-sm text-ink-2">
+              Choose a PDF or EPUB, or drop it here. {sync.state === 'off' ? 'It stays on this device unless you turn on sync.' : 'It syncs to your other devices.'}
+            </span>
           </button>
         )}
 
@@ -225,6 +247,41 @@ export default function Library() {
         )}
         {docs && docs.length > 0 && <p className="mt-4 text-center text-sm text-ink-3">Drop PDFs or EPUBs anywhere on this page to add them.</p>}
       </main>
+
+      <Sheet open={addOpen} onClose={() => setAddOpen(false)} title="Add to your library">
+        <div className="grid gap-2 pb-2">
+          <button
+            type="button"
+            onClick={() => {
+              setAddOpen(false)
+              input.current?.click()
+            }}
+            className="flex items-center gap-3 rounded-xl border border-line px-4 py-3 text-left hover:bg-paper-2"
+          >
+            <Icon name="plus" size={20} className="text-moss" />
+            <span>
+              <span className="block font-semibold">Choose a file</span>
+              <span className="text-sm text-ink-3">PDF, EPUB or text file</span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAddOpen(false)
+              setPasteOpen(true)
+            }}
+            className="flex items-center gap-3 rounded-xl border border-line px-4 py-3 text-left hover:bg-paper-2"
+          >
+            <Icon name="paste" size={20} className="text-moss" />
+            <span>
+              <span className="block font-semibold">Paste text</span>
+              <span className="text-sm text-ink-3">An article, an email, a message in French</span>
+            </span>
+          </button>
+        </div>
+      </Sheet>
+
+      <SyncSheet open={syncOpen} onClose={() => setSyncOpen(false)} joinCode={joinCode} />
 
       <VoiceCheck open={voicesOpen} onClose={() => setVoicesOpen(false)} />
 

@@ -19,6 +19,7 @@ const paths: Record<string, ReactNode> = {
   repeat: <path d="M17 3l3 3-3 3M4 12V9a3 3 0 013-3h13M7 21l-3-3 3-3M20 12v3a3 3 0 01-3 3H4" />,
   pencil: <path d="M14 5l5 5M4 20l4-1 11-11-4-4L4 15z" />,
   search: <path d="M11 18a7 7 0 110-14 7 7 0 010 14zM20 20l-4-4" />,
+  cloud: <path d="M7 18h10a4 4 0 00.6-7.96A6 6 0 006.2 9.1 4.5 4.5 0 007 18z" />,
   close: <path d="M6 6l12 12M18 6L6 18" />,
   trash: <path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" />,
   bookmark: <path d="M7 4h10v16l-5-4-5 4z" />,
