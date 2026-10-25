@@ -37,19 +37,19 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
+      includeAssets: ['favicon.png', 'favicon-32.png', 'apple-touch-icon.png'],
       manifest: {
         name: 'Qari Reader',
         short_name: 'Qari',
         description: 'Read PDFs, EPUBs, Word files, web articles and scanned pages aloud, and look up any word as you listen.',
         theme_color: '#1f2a24',
-        background_color: '#f6f3ec',
+        background_color: '#000000',
         display: 'standalone',
         start_url: '/',
         icons: [
           { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
-          { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          { src: 'icon-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
         // Android: "Share → Qari" from the browser or any app sends the link (or text) here.
         share_target: { action: '/', method: 'GET', params: { title: 'title', text: 'text', url: 'url' } },
