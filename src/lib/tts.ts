@@ -1,3 +1,4 @@
+import { getSettings } from './settings'
 import type { Lang } from '../types'
 import { baseLang, words } from './lang'
 
@@ -34,22 +35,34 @@ export function onVoicesChanged(cb: () => void) {
   return () => speechSynthesis.removeEventListener('voiceschanged', h)
 }
 
-/** Higher is better: prefer the natural-sounding voices each platform ships. */
-function voiceScore(v: SpeechSynthesisVoice, lang: Lang) {
-  let s = 0
+// Joke voices (Bubbles, Zarvox…) and the robotic Eloquence voices (Eddy, Flo, Grandma…) that Apple ships in every language.
+const NOVELTY = /\b(albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jester|organ|superstar|trinoids|whisper|wobble|zarvox|deranged|hysterical|pipe organ|fred|junior|kathy|ralph|eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley)\b/
+
+/**
+ * How good a voice sounds: 0 = never offered, 1 = basic (robotic), 2 = good, 3 = very good.
+ * Very good: Apple Enhanced/Premium and Siri voices, Microsoft Natural voices (Edge). Good: Google's voices in Chrome, Android network voices.
+ */
+export function voiceTier(v: SpeechSynthesisVoice): 0 | 1 | 2 | 3 {
   const name = v.name.toLowerCase()
+  const uri = (v.voiceURI || '').toLowerCase()
+  if (/eloquence|speech\.synthesis\.voice\.|espeak|novelty/.test(uri) || /espeak|novelty/.test(name)) return 0
+  if (NOVELTY.test(name.replace(/\(.*?\)/g, ''))) return 0
+  if (/premium|enhanced|natural|neural|siri/.test(name) || /\.(premium|enhanced)\.|siri/.test(uri)) return 3
+  if (/compact/.test(uri)) return 1
+  if (/^google\b/.test(name) || /network/.test(uri) || /network/.test(name)) return 2
+  return 1
+}
+
+/** Higher is better, within a tier: prefer the usual region for each language. */
+function voiceScore(v: SpeechSynthesisVoice, lang: Lang) {
+  let s = voiceTier(v) * 100
   const tag = v.lang.toLowerCase().replace('_', '-')
-  if (/natural|neural|premium|enhanced|online/.test(name)) s += 50
-  if (/siri/.test(name)) s += 45
-  if (/google/.test(name)) s += 30
-  if (/microsoft/.test(name)) s += 10
-  if (/compact|eloquence|espeak|novelty|bad news|bells|bubbles|cellos|zarvox|whisper|wobble|trinoids|boing|jester|organ|superstar|albert|bahh|fred|junior|ralph|kathy|grandma|grandpa|rocko|shelley|flo|reed|sandy/.test(name)) s -= 60
+  if (/premium/.test(v.name.toLowerCase() + v.voiceURI.toLowerCase())) s += 20 // Apple: Premium beats Enhanced
   if (v.localService) s += 3
   if (v.default) s += 2
-  // Regional preferences
   const pref: Record<string, string[]> = {
     en: ['en-us', 'en-gb'],
-    ar: ['ar-sa', 'ar-eg', 'ar-ae', 'ar-jo', 'ar-lb', 'ar-sy'],
+    ar: ['ar-lb', 'ar-sy', 'ar-jo', 'ar-sa', 'ar-eg', 'ar-ae'],
     fr: ['fr-fr', 'fr-ca'],
     de: ['de-de'],
     es: ['es-es', 'es-mx', 'es-us'],
@@ -60,12 +73,49 @@ function voiceScore(v: SpeechSynthesisVoice, lang: Lang) {
   return s
 }
 
-export function voicesFor(lang: Lang, all = voiceCache) {
-  return all.filter((v) => baseLang(v.lang) === lang).sort((a, b) => voiceScore(b, lang) - voiceScore(a, lang))
+/**
+ * Voices for a language, best first. Normally only the good ones; if a device has none for this language,
+ * just its single best basic voice so it can still read. `all` lists everything except the joke voices.
+ */
+export function voicesFor(lang: Lang, opts: { all?: boolean } = {}) {
+  const list = voiceCache
+    .filter((v) => baseLang(v.lang) === lang && voiceTier(v) > 0)
+    .sort((a, b) => voiceScore(b, lang) - voiceScore(a, lang))
+  if (opts.all) return list
+  const good = list.filter((v) => voiceTier(v) >= 2)
+  return good.length ? good : list.slice(0, 1)
+}
+
+/** True when the best this device can do for a language is a basic voice. */
+export function onlyBasic(lang: Lang) {
+  const best = voicesFor(lang)[0]
+  return !!best && voiceTier(best) < 2
+}
+
+export function platform() {
+  const ua = navigator.userAgent
+  if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document)) return 'ios'
+  if (/Android/.test(ua)) return 'android'
+  if (/Windows/.test(ua)) return 'windows'
+  if (/Macintosh/.test(ua)) return 'mac'
+  return 'other'
+}
+
+const HOW_TO: Record<string, string> = {
+  ios: 'Settings › Accessibility › Spoken Content › Voices, choose the language, and download an “Enhanced” or “Premium” voice.',
+  mac: 'System Settings › Accessibility › Spoken Content › System voice › Manage Voices, and download an “Enhanced” or “Premium” voice for the language. Or open Qari in Microsoft Edge for its free “Natural” voices.',
+  android: 'Settings › System › Languages › Text-to-speech output › Speech Services by Google › Install voice data.',
+  windows: 'Open Qari in Microsoft Edge: its free “Natural” voices sound far better and appear here automatically.',
+  other: 'Add a text-to-speech voice for this language in your system settings, or open Qari in Chrome, Edge or Safari.',
+}
+
+/** Where to get a better voice on this kind of device. */
+export function betterVoiceHint() {
+  return HOW_TO[platform()]
 }
 
 export function pickVoice(lang: Lang, preferredURI?: string): SpeechSynthesisVoice | undefined {
-  const list = voicesFor(lang)
+  const list = voicesFor(lang, { all: getSettings().showAllVoices })
   return list.find((v) => v.voiceURI === preferredURI) || list[0]
 }
 

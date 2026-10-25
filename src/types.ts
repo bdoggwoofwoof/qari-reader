@@ -81,6 +81,7 @@ export interface Settings {
   skipCitations: boolean
   pronunciations: Pronunciation[]
   voiceCheckDone: boolean
+  showAllVoices?: boolean // per device: list basic voices too
   tourDone?: boolean // per device: the guided tour has been offered
   learning: Lang[] // languages you're learning: new words are marked in their books
   ankiDecks: Record<Lang, string> // deck to send each language's words to

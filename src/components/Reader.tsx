@@ -10,7 +10,7 @@ import PageViewer from './PageViewer'
 import { detectLang, isMostlyArabic, sentences, stripArabicMarks, words, type Span } from '../lib/lang'
 import { rateFor, useSettings } from '../lib/settings'
 import { speechText } from '../lib/speechText'
-import { CHARS_PER_SEC, getVoices, SAMPLES, onVoicesChanged, pickVoice, SentenceSpeaker, speechSupported, speakWord, voicesFor } from '../lib/tts'
+import { voiceTier, betterVoiceHint, CHARS_PER_SEC, getVoices, SAMPLES, onlyBasic, onVoicesChanged, pickVoice, SentenceSpeaker, speechSupported, speakWord, voicesFor } from '../lib/tts'
 import { ARABIC_FONTS, LANG_NAMES, RTL_LANGS, type ArabicFont, type DocContent, type DocMeta, type Highlight, type Lang } from '../types'
 import LookupSheet, { type Picked } from './LookupSheet'
 import { claudeStatus } from '../lib/translate'
@@ -910,7 +910,7 @@ export default function Reader({ id }: { id: string }) {
 
   const voicesNow = (lang: Lang) => {
     void voicesVersion
-    return voicesFor(lang)
+    return voicesFor(lang, { all: settings.showAllVoices })
   }
   const isLast = chapter >= content.chapters.length - 1
 
@@ -1309,7 +1309,7 @@ export default function Reader({ id }: { id: string }) {
                     >
                       {list.map((v) => (
                         <option key={v.voiceURI} value={v.voiceURI}>
-                          {v.name} ({v.lang}){v.localService ? '' : ' · online'}
+                          {v.name} ({v.lang}){v.localService ? '' : ' · online'}{voiceTier(v) < 2 ? ' · basic' : ''}
                         </option>
                       ))}
                     </select>
@@ -1324,7 +1324,18 @@ export default function Reader({ id }: { id: string }) {
               </div>
             )
           })}
-          <p className="text-xs text-ink-3">Voices marked “online” need an internet connection. Voices with “Natural”, “Enhanced” or “Premium” in the name sound best.</p>
+          {chapterLangs.some((l) => onlyBasic(l)) && !settings.showAllVoices && (
+            <p className="mb-3 rounded-xl bg-paper-2 px-3 py-2 text-sm text-ink-2">
+              This device only has a basic {chapterLangs.filter((l) => onlyBasic(l)).map((l) => LANG_NAMES[l] || l).join(' and ')} voice. {betterVoiceHint()}
+            </p>
+          )}
+          <p className="text-xs text-ink-3">
+            {settings.showAllVoices ? 'Showing every voice on this device. ' : 'Only the natural-sounding voices are listed. '}
+            <button type="button" className="underline underline-offset-2" onClick={() => updateSettings({ showAllVoices: !settings.showAllVoices })}>
+              {settings.showAllVoices ? 'Show only the best' : 'Show all voices'}
+            </button>
+            {settings.showAllVoices ? '' : '. Voices marked “online” need an internet connection.'}
+          </p>
         </section>
 
         <Toggle

@@ -1,27 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useSettings } from '../lib/settings'
-import { getVoices, onVoicesChanged, pickVoice, SAMPLES, speakWord, voicesFor } from '../lib/tts'
+import { betterVoiceHint, getVoices, onlyBasic, onVoicesChanged, pickVoice, SAMPLES, speakWord, voicesFor } from '../lib/tts'
 import { LANG_NAMES, type Lang } from '../types'
 import { Icon, IconButton, Sheet } from './ui'
 
 const CHECK_LANGS: Lang[] = ['en', 'ar', 'fr', 'de']
-
-function platform() {
-  const ua = navigator.userAgent
-  if (/iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document)) return 'ios'
-  if (/Android/.test(ua)) return 'android'
-  if (/Windows/.test(ua)) return 'windows'
-  if (/Macintosh/.test(ua)) return 'mac'
-  return 'other'
-}
-
-const HOW_TO: Record<string, string> = {
-  ios: 'Settings › Accessibility › Spoken Content › Voices, choose the language, and download an “Enhanced” or “Premium” voice.',
-  mac: 'System Settings › Accessibility › Spoken Content › System voice › Manage Voices, and download a voice for the language.',
-  android: 'Settings › System › Languages › Text-to-speech output › Speech Services by Google › Install voice data.',
-  windows: 'Settings › Time & language › Speech › Add voices. In Microsoft Edge, the “Natural” online voices also appear here automatically.',
-  other: 'Add a text-to-speech voice for this language in your system settings, or open Qari in Chrome, Edge or Safari.',
-}
 
 /** Shows which reading languages this device can speak, with a sample for each. */
 export default function VoiceCheck({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -38,8 +21,8 @@ export default function VoiceCheck({ open, onClose }: { open: boolean; onClose: 
     onClose()
   }
 
-  const plat = platform()
   const missing = CHECK_LANGS.filter((l) => !voicesFor(l).length)
+  const basic = CHECK_LANGS.filter((l) => onlyBasic(l))
 
   return (
     <Sheet open={open} onClose={close} title="Voices on this device" wide>
@@ -51,15 +34,15 @@ export default function VoiceCheck({ open, onClose }: { open: boolean; onClose: 
           return (
             <li key={lang} className="flex items-center gap-3 py-3">
               <span
-                className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${list.length ? 'bg-wash text-moss' : 'bg-paper-2 text-danger'}`}
+                className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${!list.length ? 'bg-paper-2 text-danger' : onlyBasic(lang) ? 'bg-paper-2 text-ink-3' : 'bg-wash text-moss'}`}
                 aria-hidden="true"
               >
-                {list.length ? '✓' : '!'}
+                {!list.length ? '!' : onlyBasic(lang) ? '~' : '✓'}
               </span>
               <div className="min-w-0 flex-1">
                 <div className="font-semibold">{LANG_NAMES[lang]}</div>
                 <div className="truncate text-sm text-ink-3">
-                  {best ? `${best.name}${list.length > 1 ? ` · ${list.length} voices` : ''}` : 'No voice installed'}
+                  {best ? `${best.name}${onlyBasic(lang) ? ' · basic voice' : list.length > 1 ? ` · ${list.length} good voices` : ''}` : 'No voice installed'}
                 </div>
               </div>
               {best && <IconButton icon="speaker" label={`Hear ${LANG_NAMES[lang]}`} onClick={() => speakWord(SAMPLES[lang], lang, best.voiceURI, 1)} className="border border-line" />}
@@ -67,10 +50,14 @@ export default function VoiceCheck({ open, onClose }: { open: boolean; onClose: 
           )
         })}
       </ul>
-      {missing.length > 0 && (
+      {(missing.length > 0 || basic.length > 0) && (
         <div className="mt-4 rounded-xl bg-paper-2 px-4 py-3 text-sm">
-          <p className="font-semibold">To add {missing.map((l) => LANG_NAMES[l]).join(', ')}:</p>
-          <p className="mt-1 text-ink-2">{HOW_TO[plat]}</p>
+          <p className="font-semibold">
+            {missing.length > 0 && `To add ${missing.map((l) => LANG_NAMES[l]).join(', ')}`}
+            {missing.length > 0 && basic.length > 0 && ', and '}
+            {basic.length > 0 && `${missing.length ? 'for' : 'For'} a better ${basic.map((l) => LANG_NAMES[l]).join(', ')} voice`}:
+          </p>
+          <p className="mt-1 text-ink-2">{betterVoiceHint()}</p>
           <p className="mt-1 text-ink-2">Then reopen Qari.</p>
         </div>
       )}
