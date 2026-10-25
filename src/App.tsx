@@ -35,6 +35,8 @@ export default function App() {
     document.documentElement.dataset.theme = settings.theme
     const meta = document.querySelector('meta[name="theme-color"]')
     meta?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--paper').trim())
+    // iPhone reads this when you tap Add to Home Screen, so the home-screen icon matches the theme in use then.
+    document.querySelector('link[rel="apple-touch-icon"]')?.setAttribute('href', settings.theme === 'dark' ? '/apple-touch-icon.png' : '/apple-touch-icon-light.png')
   }, [settings.theme])
 
   useEffect(() => {

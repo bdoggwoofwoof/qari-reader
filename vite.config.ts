@@ -37,7 +37,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.png', 'favicon-32.png', 'apple-touch-icon.png'],
+      includeAssets: ['favicon*.png', 'apple-touch-icon*.png', 'icon-*-light.png'],
       manifest: {
         name: 'Qari Reader',
         short_name: 'Qari',
