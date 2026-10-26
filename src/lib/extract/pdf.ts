@@ -40,6 +40,9 @@ const clean = (s: string) =>
     .replace(/[­​]/g, '')
     .replace(/\s+/g, ' ')
 
+// Western, Arabic-Indic (٤٥) and Persian (۴۵) digits: Arabic books number their pages either way.
+const DIGIT = '[0-9\u0660-\u0669\u06F0-\u06F9]'
+const RTL_ONE = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/
 const RTL_CHAR = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/g
 const LTR_CHAR = /[A-Za-z\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF0-9]/g
 
@@ -83,19 +86,27 @@ async function pageLines(page: pdfjs.PDFPageProxy): Promise<PageLines> {
   const items = (content.items as unknown[]).filter((i): i is TextItem => typeof (i as TextItem).str === 'string')
 
   const lines: Line[] = []
-  let cur: { parts: { text: string; x: number; end: number; size: number }[]; y: number; size: number } | null = null
+  type Raw = { parts: { text: string; x: number; end: number; size: number }[]; y: number; size: number }
+  let cur: Raw | null = null
+  const raws: Raw[] = []
   let breakNext = false
 
   const flush = () => {
-    if (!cur || !cur.parts.length) return
+    if (cur?.parts.length) raws.push(cur)
+    cur = null
+  }
+
+  const build = (cur: Raw, pageRtl: boolean) => {
     // Drop tiny footnote-marker numbers that sit raised inside a line ("word¹").
     const main = median(cur.parts.map((p) => p.size))
-    const rtl = isRtlLine(cur.parts.map((p) => p.text).join(''))
+    const joined = cur.parts.map((p) => p.text).join('')
+    // On an Arabic page, a line with a long English title in it is still an Arabic line.
+    const rtl = isRtlLine(joined) || (pageRtl && RTL_ONE.test(joined))
     const parts = rtl ? rtlOrder(cur.parts) : cur.parts
     let text = ''
     let prev: { x: number; end: number } | null = null
     for (const p of parts) {
-      if (/^\d{1,3}[a-z]?$/.test(p.text.trim()) && p.size < main * 0.75) continue
+      if (new RegExp(`^${DIGIT}{1,3}[a-z]?$`).test(p.text.trim()) && p.size < main * 0.75) continue
       if (prev && text && !/\s$/.test(text) && !/^\s/.test(p.text)) {
         const gap = rtl ? Math.min(Math.abs(prev.x - p.end), Math.abs(p.x - prev.end)) : Math.abs(p.x - prev.end)
         if (gap > main * 0.18) text += ' '
@@ -109,7 +120,6 @@ async function pageLines(page: pdfjs.PDFPageProxy): Promise<PageLines> {
       const ends = cur.parts.map((p) => p.end)
       lines.push({ text, x: Math.min(...xs), y: cur.y, size: main, width: Math.max(...ends) - Math.min(...xs), rtl })
     }
-    cur = null
   }
 
   for (const it of items) {
@@ -128,13 +138,16 @@ async function pageLines(page: pdfjs.PDFPageProxy): Promise<PageLines> {
     cur.parts.push({ text: it.str, x: e, end: e + it.width, size })
   }
   flush()
+  const texts = raws.map((r) => r.parts.map((p) => p.text).join(''))
+  const pageRtl = texts.filter((t) => isRtlLine(t)).length > texts.filter((t) => /\p{L}/u.test(t)).length / 2
+  for (const r of raws) build(r, pageRtl)
   return { lines, height: viewport.height }
 }
 
 /** Lines that repeat on many pages near the top or bottom are running headers/footers. */
-function findRepeating(pages: PageLines[]) {
+function findRepeating(pages: PageLines[], bodySize: number) {
   const counts = new Map<string, number>()
-  const key = (t: string) => t.replace(/\d+/g, '#').toLowerCase()
+  const key = (t: string) => t.replace(new RegExp(`${DIGIT}+`, 'g'), '#').toLowerCase()
   for (const p of pages) {
     const seen = new Set<string>()
     for (const l of p.lines) {
@@ -142,11 +155,19 @@ function findRepeating(pages: PageLines[]) {
     }
     for (const k of seen) counts.set(k, (counts.get(k) || 0) + 1)
   }
+  // Book-wide headers repeat on most pages; a chapter's running title only on that chapter's pages, so short
+  // lines repeating on 3+ pages count too. Either way, text set larger than the body is a heading, not a header
+  // (a chapter's opening heading often repeats its running title).
   const threshold = Math.max(3, pages.length * 0.3)
   const repeating = new Set<string>()
-  for (const [k, c] of counts) if (c >= threshold) repeating.add(k)
+  const chapterTitles = new Set<string>()
+  for (const [k, c] of counts) {
+    if (c >= threshold) repeating.add(k)
+    else if (c >= 3 && k.length <= 100) chapterTitles.add(k)
+  }
+  const pageNum = new RegExp(`^[-–—\\s]*${DIGIT}{1,4}[-–—\\s]*$|^(page|صفحة|ص\\.?)\\s*${DIGIT}+`, 'i')
   return (l: Line, p: PageLines) =>
-    (l.y < p.height * 0.1 || l.y > p.height * 0.9) && (repeating.has(key(l.text)) || /^[-–—\s]*\d{1,4}[-–—\s]*$|^page \d+/i.test(l.text))
+    (l.y < p.height * 0.1 || l.y > p.height * 0.9) && (((repeating.has(key(l.text)) || chapterTitles.has(key(l.text))) && l.size <= bodySize * 1.1) || pageNum.test(l.text))
 }
 
 interface Block {
@@ -256,7 +277,7 @@ export async function extractPdf(data: ArrayBuffer, onProgress?: (p: number) => 
   for (const p of pages) for (const l of p.lines) sizeChars.set(Math.round(l.size * 2) / 2, (sizeChars.get(Math.round(l.size * 2) / 2) || 0) + l.text.length)
   const bodySize = [...sizeChars.entries()].sort((a, b) => b[1] - a[1])[0][0]
 
-  const isNoise = findRepeating(pages)
+  const isNoise = findRepeating(pages, bodySize)
   const gaps: number[] = []
   for (const p of pages) {
     const ls = p.lines.filter((l) => Math.abs(l.size - bodySize) < bodySize * 0.15 && !isNoise(l, p))

@@ -19,7 +19,12 @@ function isNoteRef(el: Element) {
   if (/noteref|doc-noteref/.test(type)) return true
   // <sup><a href="#fn3">3</a></sup>
   // <sup>3</sup>, <sup>[12]</sup>, <sup><a href="#fn3">a</a></sup>, and web citation markers like Wikipedia's.
-  if (el.tagName.toLowerCase() === 'sup' && /^\s*\[?\s*[\d*†‡a-z]{1,4}\s*\]?\s*$/i.test(el.textContent || '')) return true
+  // Letters only count when they link somewhere: "XIX<sup>e</sup>", "M<sup>me</sup>" and "1<sup>er</sup>" are words.
+  if (el.tagName.toLowerCase() === 'sup') {
+    const t = el.textContent || ''
+    if (/^\s*\[?\s*[\d*†‡]{1,4}\s*\]?\s*$/.test(t)) return true
+    if (/^\s*\[?\s*[a-z]{1,2}\s*\]?\s*$/i.test(t) && el.querySelector('a[href^="#"], a[href*="#"]')) return true
+  }
   if (/\b(reference|cite_ref|footnote-ref|noteref)\b/i.test((el.getAttribute('class') || '') + ' ' + (el.getAttribute('id') || ''))) return true
   return false
 }

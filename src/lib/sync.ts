@@ -98,15 +98,25 @@ class HttpError extends Error {
   }
 }
 
+/** The server limits how fast one device can sync (so strangers can't fill the storage): wait and try again. */
+async function fetchPatiently(url: string, init: RequestInit) {
+  for (let attempt = 0; ; attempt++) {
+    const r = await fetch(url, init)
+    if (r.status !== 429 || attempt >= 5) return r
+    const wait = Number(r.headers.get('Retry-After')) || 5 * 2 ** attempt
+    await new Promise((res) => setTimeout(res, Math.min(wait, 60) * 1000))
+  }
+}
+
 async function getFile(space: string, file: string): Promise<{ data: Uint8Array; etag: string } | null> {
-  const r = await fetch(`/api/sync?space=${space}&file=${file}`, { cache: 'no-store' })
+  const r = await fetchPatiently(`/api/sync?space=${space}&file=${file}`, { cache: 'no-store' })
   if (r.status === 404) return null
   if (!r.ok) throw new HttpError(r.status, await errorText(r))
   return { data: new Uint8Array(await r.arrayBuffer()), etag: r.headers.get('ETag') || '' }
 }
 
 async function putFile(space: string, file: string, data: Uint8Array, ifMatch?: string) {
-  const r = await fetch(`/api/sync?space=${space}&file=${file}`, {
+  const r = await fetchPatiently(`/api/sync?space=${space}&file=${file}`, {
     method: 'PUT',
     body: data as BodyInit,
     headers: { 'Content-Type': 'application/octet-stream', ...(ifMatch ? { 'If-Match': ifMatch } : {}) },

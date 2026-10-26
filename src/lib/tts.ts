@@ -78,6 +78,8 @@ function voiceScore(v: SpeechSynthesisVoice, lang: Lang) {
  * just its single best basic voice so it can still read. `all` lists everything except the joke voices.
  */
 export function voicesFor(lang: Lang, opts: { all?: boolean } = {}) {
+  // Voices can arrive after the page loads without a voiceschanged event (older iOS): ask again.
+  if (!voiceCache.length && speechSupported()) voiceCache = speechSynthesis.getVoices()
   const list = voiceCache
     .filter((v) => baseLang(v.lang) === lang && voiceTier(v) > 0)
     .sort((a, b) => voiceScore(b, lang) - voiceScore(a, lang))
@@ -150,9 +152,10 @@ export class SentenceSpeaker {
   private utt: SpeechSynthesisUtterance | null = null
   private timer: number | null = null
   private estTimer: number | null = null
+  private watchdog: number | null = null
   private token = 0
 
-  speak(o: SpeakOptions) {
+  speak(o: SpeakOptions, retry = 0) {
     this.stop()
     const token = ++this.token
     const u = new SpeechSynthesisUtterance(o.text)
@@ -162,10 +165,26 @@ export class SentenceSpeaker {
     const voiceKey = o.voice?.voiceURI || 'default:' + o.lang
     const wordSpans = words(o.text, o.lang)
     let gotBoundary = false
+    let started = false
+
+    // Some voices (Chrome's Google voices, some Android ones) go quiet without ever firing onend.
+    // If nothing has happened for twice the expected time, treat the sentence as finished.
+    const cps = (CHARS_PER_SEC[o.lang] || 14) * o.rate
+    const armWatchdog = (fromChar: number) => {
+      if (this.watchdog) clearTimeout(this.watchdog)
+      const ms = ((o.text.length - fromChar) / cps) * 2000 + (started ? 3000 : 8000)
+      this.watchdog = window.setTimeout(() => {
+        if (token !== this.token) return
+        this.stop()
+        // In the background the browser may simply have paused speech: keep the place rather than skip ahead.
+        if (document.hidden) o.onError('Reading paused while Qari was in the background.')
+        else o.onEnd()
+      }, ms)
+    }
+    armWatchdog(0)
 
     const startEstimate = () => {
       // Voice gives no word timing: move the highlight at an estimated reading pace.
-      const cps = (CHARS_PER_SEC[o.lang] || 14) * o.rate
       let i = 0
       const step = () => {
         if (token !== this.token || gotBoundary || i >= wordSpans.length) return
@@ -181,6 +200,8 @@ export class SentenceSpeaker {
 
     u.onstart = () => {
       if (token !== this.token) return
+      started = true
+      armWatchdog(0)
       if (boundaryVoices.get(voiceKey) === false) startEstimate()
       else
         this.timer = window.setTimeout(() => {
@@ -198,6 +219,7 @@ export class SentenceSpeaker {
         if (this.estTimer) clearTimeout(this.estTimer)
       }
       const idx = e.charIndex
+      armWatchdog(idx)
       const w = wordSpans.find((s) => idx >= s.start && idx < s.end) || wordSpans.find((s) => s.start >= idx)
       if (w) o.onWord(w.start, w.end)
     }
@@ -211,7 +233,12 @@ export class SentenceSpeaker {
       if (token !== this.token) return
       this.clearTimers()
       this.utt = null
-      if (e.error === 'interrupted' || e.error === 'canceled') return
+      if (e.error === 'interrupted' || e.error === 'canceled') {
+        // Our own stop() detaches these handlers first, so this came from outside: another sound, a call,
+        // or iOS dropping an utterance queued right after cancel(). Retry once if it never started.
+        if (!started && retry < 1) return this.speak(o, retry + 1)
+        return o.onError('Reading was interrupted. Tap play to carry on.')
+      }
       o.onError(e.error === 'not-allowed' ? 'Tap play to start audio.' : `Speech error: ${e.error}`)
     }
     this.utt = u // keep a reference: Chrome drops events for garbage-collected utterances
@@ -223,7 +250,8 @@ export class SentenceSpeaker {
   private clearTimers() {
     if (this.timer) clearTimeout(this.timer)
     if (this.estTimer) clearTimeout(this.estTimer)
-    this.timer = this.estTimer = null
+    if (this.watchdog) clearTimeout(this.watchdog)
+    this.timer = this.estTimer = this.watchdog = null
   }
 
   stop() {

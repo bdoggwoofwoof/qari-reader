@@ -34,6 +34,8 @@ async function load(lang: Lang) {
   return cache.get(lang)!
 }
 
+let learningLoaded: Promise<void> | null = null
+
 async function loadLearning() {
   learningCache.clear()
   for (const w of await listWords()) {
@@ -54,7 +56,8 @@ function wire() {
   // Another device synced new known words or saved words.
   window.addEventListener('qari:synced', () => {
     cache.clear()
-    loadLearning().then(bump)
+    learningLoaded = loadLearning()
+    learningLoaded.then(bump)
   })
 }
 
@@ -93,8 +96,12 @@ export function useVocab(langs: Lang[]) {
     let live = true
     const h = () => live && setV(version)
     listeners.add(h)
-    Promise.all([...key.split(',').filter(Boolean).map(load), loadLearning()]).then(() => {
-      bump()
+    // Only re-render readers when a list actually had to be loaded; opening a lookup shouldn't redraw the book.
+    const missing = key.split(',').filter((l) => l && !cache.has(l))
+    if (!learningLoaded) learningLoaded = loadLearning()
+    const first = !!missing.length
+    Promise.all([...missing.map(load), learningLoaded]).then(() => {
+      if (first || version === 0) bump()
     })
     return () => {
       live = false

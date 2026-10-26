@@ -5,7 +5,7 @@ import { timingSafeEqual } from 'node:crypto'
  * Optional, better translation with Claude: meaning in context, idioms, and which variety of Arabic.
  * Off unless both are set in Vercel → Settings → Environment Variables:
  *   ANTHROPIC_API_KEY   – your Anthropic API key (usage is billed to it; a lookup costs a fraction of a cent)
- *   QARI_ACCESS_CODE    – any passphrase; enter the same one in Qari's reading settings
+ *   QARI_ACCESS_CODE    – a long random passphrase (20+ characters); enter the same one in Qari's reading settings
  * Without them, Qari uses the free MyMemory service from the device instead.
  *
  *   GET  /api/translate → { claude: boolean }
@@ -13,6 +13,7 @@ import { timingSafeEqual } from 'node:crypto'
  */
 
 const MODEL = process.env.QARI_TRANSLATE_MODEL || 'claude-haiku-5-5'
+const MIN_CODE = 20
 const NAMES: Record<string, string> = {
   en: 'English', ar: 'Arabic', fr: 'French', de: 'German', es: 'Spanish', it: 'Italian', pt: 'Portuguese',
   tr: 'Turkish', fa: 'Persian', ur: 'Urdu', he: 'Hebrew', ru: 'Russian', nl: 'Dutch', el: 'Greek',
@@ -33,9 +34,12 @@ function codeMatches(given: string) {
 export default {
   async fetch(request: Request) {
     const configured = !!process.env.ANTHROPIC_API_KEY && !!process.env.QARI_ACCESS_CODE
-    if (request.method === 'GET') return json(200, { claude: configured })
+    // Anyone can guess at the code, and each right guess spends your Anthropic credit: a short one isn't accepted.
+    const strong = (process.env.QARI_ACCESS_CODE || '').length >= MIN_CODE
+    if (request.method === 'GET') return json(200, { claude: configured && strong })
     if (request.method !== 'POST') return json(405, { error: 'Method not allowed.' })
     if (!configured) return json(503, { error: 'Claude translation isn’t set up on this deployment.' })
+    if (!strong) return json(503, { error: `QARI_ACCESS_CODE must be at least ${MIN_CODE} characters. Set a longer one in Vercel.` })
     if (!codeMatches(request.headers.get('x-qari-code') || '')) return json(401, { error: 'Wrong access code.' })
 
     let body: { text?: string; from?: string; to?: string; context?: string }
@@ -69,14 +73,29 @@ export default {
           'x-api-key': process.env.ANTHROPIC_API_KEY!,
           'anthropic-version': '2023-06-01',
         },
-        body: JSON.stringify({ model: MODEL, max_tokens: 500, system, messages: [{ role: 'user', content: user }] }),
+        // A short translation needs no reasoning: thinking off at low effort keeps it fast, cheap and inside max_tokens.
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: 1024,
+          thinking: { type: 'disabled' },
+          output_config: { effort: 'low' },
+          system,
+          messages: [{ role: 'user', content: user }],
+        }),
       })
     } catch {
       return json(502, { error: 'Claude didn’t respond.' })
     }
     if (!r.ok) return json(502, { error: `Claude returned an error (${r.status}).` })
-    const data = (await r.json()) as { content?: { type: string; text?: string }[] }
+    let data: { content?: { type: string; text?: string }[]; stop_reason?: string }
+    try {
+      data = await r.json()
+    } catch {
+      return json(502, { error: 'Claude sent a reply that couldn’t be read.' })
+    }
+    if (data.stop_reason === 'refusal') return json(502, { error: 'Claude declined to translate this.' })
     const out = data.content?.find((c) => c.type === 'text')?.text || ''
+    if (!out.trim()) return json(502, { error: 'Claude returned an empty translation.' })
     try {
       const parsed = JSON.parse(out.replace(/^```(?:json)?\s*|\s*```$/g, ''))
       return json(200, { translation: String(parsed.translation || '').trim(), notes: String(parsed.notes || '').trim() })

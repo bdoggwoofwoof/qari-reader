@@ -90,6 +90,24 @@ function segmenter(lang: Lang, granularity: 'sentence' | 'word') {
 
 const ABBREV = /(?:\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|e\.g|i\.e|cf|p|pp|vol|ch|ed|eds|no|Fig|Jan|Feb|Mar|Apr|Aug|Sept|Oct|Nov|Dec|M|Mme|Hr|Fr|z\.B|bzw|ca|S)\.|\b[A-Z]\.)\s*$/
 
+const MAX_CHUNK = 180
+
+/** Cuts a span that is still too long at the space nearest the middle of each MAX_CHUNK window. */
+function splitAtSpaces(text: string, span: Span): Span[] {
+  const out: Span[] = []
+  let start = span.start
+  while (span.end - start > MAX_CHUNK + 40) {
+    const target = start + Math.round(MAX_CHUNK * 0.8)
+    let cut = text.lastIndexOf(' ', target)
+    if (cut <= start + 40) cut = text.indexOf(' ', target)
+    if (cut < 0 || cut >= span.end - 20) break
+    out.push({ start, end: cut + 1 })
+    start = cut + 1
+  }
+  out.push({ start, end: span.end })
+  return out
+}
+
 /** Splits a paragraph into sentences, keeping long sentences speakable. */
 export function sentences(text: string, lang: Lang): Span[] {
   const raw: Span[] = []
@@ -103,25 +121,28 @@ export function sentences(text: string, lang: Lang): Span[] {
     if (prev && ABBREV.test(text.slice(prev.start, prev.end))) prev.end = s.end
     else merged.push({ ...s })
   }
-  // Break very long sentences at commas/semicolons so the voice never runs too long in one go.
+  // Break long sentences at commas/semicolons, and failing that between words, so no single utterance runs
+  // much past ten seconds: some voices (Chrome's Google voices) go silent after about fifteen.
   const out: Span[] = []
   for (const s of merged) {
-    if (s.end - s.start <= 280) {
+    if (s.end - s.start <= MAX_CHUNK) {
       out.push(s)
       continue
     }
+    const pieces: Span[] = []
     let start = s.start
     const re = /[,;:،؛]\s+/g
     re.lastIndex = s.start
     let m: RegExpExecArray | null
     while ((m = re.exec(text)) && m.index < s.end) {
       const cut = m.index + m[0].length
-      if (cut - start >= 120 && s.end - cut >= 40) {
-        out.push({ start, end: cut })
+      if (cut - start >= 80 && s.end - cut >= 40) {
+        pieces.push({ start, end: cut })
         start = cut
       }
     }
-    out.push({ start, end: s.end })
+    pieces.push({ start, end: s.end })
+    for (const p of pieces) out.push(...splitAtSpaces(text, p))
   }
   return out.filter((s) => text.slice(s.start, s.end).trim().length > 0)
 }
@@ -150,7 +171,13 @@ export function arabicCandidates(word: string): string[] {
   const prefixes = ['وال', 'فال', 'بال', 'كال', 'لل', 'ال', 'و', 'ف', 'ب', 'ل', 'ك', 'س']
   const suffixes = ['هما', 'كما', 'تما', 'هم', 'هن', 'كم', 'كن', 'نا', 'ها', 'ون', 'ين', 'ان', 'ات', 'وا', 'ه', 'ك', 'ي', 'ت']
   const stems = new Set<string>([w])
-  for (const p of prefixes) if (w.startsWith(p) && w.length - p.length >= 2) stems.add(w.slice(p.length))
+  // Prefixes stack: و/ف (and), then ب/ل/ك (with/for/like) or س (will), then ال (the) — وبالكتاب → كتاب.
+  const strip = (x: string, list: string[]) => {
+    for (const p of list) if (x.startsWith(p) && x.length - p.length >= 2) stems.add(x.slice(p.length))
+  }
+  strip(w, prefixes)
+  for (const c of ['و', 'ف']) if (w.startsWith(c) && w.length > 3) strip(w.slice(1), prefixes)
+  for (const x of [...stems]) if (x.startsWith('ال') && x.length > 3) stems.add(x.slice(2))
   for (const s of [...stems]) {
     out.add(s)
     for (const suf of suffixes) {

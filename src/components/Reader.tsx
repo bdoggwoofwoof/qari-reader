@@ -39,6 +39,8 @@ interface Mark {
   note: boolean
 }
 
+type WakeSentinel = { release: () => Promise<void>; addEventListener: (t: 'release', f: () => void) => void }
+
 interface Pos {
   chapter: number
   block: number
@@ -195,7 +197,7 @@ export default function Reader({ id }: { id: string }) {
   const tapTimer = useRef<number | null>(null)
   const lastTap = useRef<{ b: number; s: number; t: number } | null>(null)
   const tappedWord = useRef<{ b: number; start: number; end: number } | null>(null)
-  const wakeLock = useRef<{ release: () => Promise<void> } | null>(null)
+  const wakeLock = useRef<WakeSentinel | null>(null)
   const warnedLangs = useRef(new Set<string>())
   const lastOwnSave = useRef(0) // when this device last moved the reading position
   const resumeAfterLookup = useRef(false) // a word was tapped mid-playback: carry on when the lookup closes
@@ -311,22 +313,24 @@ export default function Reader({ id }: { id: string }) {
   }
 
   // New-word count for the whole book, shown in the library.
+  // Counting a whole book takes a moment on a phone, so it waits until reading is idle (and runs when you leave).
+  const pendingCount = useRef<(() => void) | null>(null)
   useEffect(() => {
     if (!meta || !content || !settings.learning.includes(meta.lang)) return
-    let done = false
     const run = () => {
-      if (done) return
-      done = true
+      if (pendingCount.current !== run) return
+      pendingCount.current = null
       const texts = content.chapters.flatMap((c) => c.blocks)
       const { unique, fresh } = countNew(texts, meta.lang, (s) => words(s, meta.lang))
       updateDocMeta(meta.id, { vocab: { unique, fresh, at: Date.now() } }, 'opened')
     }
-    const t = window.setTimeout(run, 1500)
-    return () => {
-      clearTimeout(t)
-      run() // leaving the book (or marking words) before the timer: still save the latest count
-    }
+    pendingCount.current = run
+    const t = window.setTimeout(() => {
+      if (!playingRef.current) run()
+    }, 4000)
+    return () => clearTimeout(t)
   }, [meta?.id, meta?.lang, content, settings.learning, vocabVersion]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => pendingCount.current?.(), [])
 
   // ---------- Highlights ----------
   useEffect(() => {
@@ -446,31 +450,58 @@ export default function Reader({ id }: { id: string }) {
   }, [chapterData])
 
   // ---------- Position saving ----------
-  const persist = useCallback(() => {
+  const writePosition = useCallback(() => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = window.setTimeout(() => {
-      const m = metaRef.current
-      const doc = contentRef.current
-      if (!m || !doc) return
-      lastOwnSave.current = Date.now()
-      const { chapter: c, block: b, sent: s } = pos.current
-      const offset = infoFor(c, b)?.sents[s]?.start ?? 0
-      const inChapter = doc.chapters[c].blocks.slice(0, b).reduce((n, t) => n + t.length, 0) + offset
-      const progress = m.charCount ? Math.min(1, ((m.charsBefore[c] ?? 0) + inChapter) / m.charCount) : 0
-      savePosition(m.id, { chapter: c, block: b, offset }, progress)
-    }, 800)
+    saveTimer.current = null
+    const m = metaRef.current
+    const doc = contentRef.current
+    if (!m || !doc) return
+    lastOwnSave.current = Date.now()
+    const { chapter: c, block: b, sent: s } = pos.current
+    const offset = infoFor(c, b)?.sents[s]?.start ?? 0
+    const inChapter = doc.chapters[c].blocks.slice(0, b).reduce((n, t) => n + t.length, 0) + offset
+    const progress = m.charCount ? Math.min(1, ((m.charsBefore[c] ?? 0) + inChapter) / m.charCount) : 0
+    savePosition(m.id, { chapter: c, block: b, offset }, progress)
   }, [infoFor])
 
+  const persist = useCallback(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = window.setTimeout(writePosition, 800)
+  }, [writePosition])
+
+  // Closing the tab or switching apps inside the save delay: write the place now.
+  useEffect(() => {
+    const flush = () => saveTimer.current && writePosition()
+    const onHide = () => document.visibilityState === 'hidden' && flush()
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', onHide)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', onHide)
+      flush()
+    }
+  }, [writePosition])
+
   // ---------- Playback ----------
+  /** Keeps the screen on while reading (iPhone stops speech when it locks). The browser drops the lock when the app is hidden. */
+  const keepAwake = () => {
+    if (!('wakeLock' in navigator) || wakeLock.current) return
+    ;(navigator as unknown as { wakeLock: { request: (t: string) => Promise<WakeSentinel> } }).wakeLock
+      .request('screen')
+      .then((l) => {
+        if (!playingRef.current) return void l.release().catch(() => {})
+        wakeLock.current = l
+        l.addEventListener('release', () => {
+          if (wakeLock.current === l) wakeLock.current = null
+        })
+      })
+      .catch(() => {})
+  }
+
   const setPlayingState = (v: boolean) => {
     playingRef.current = v
     setPlaying(v)
-    if (v && 'wakeLock' in navigator && !wakeLock.current) {
-      ;(navigator as unknown as { wakeLock: { request: (t: string) => Promise<{ release: () => Promise<void> }> } }).wakeLock
-        .request('screen')
-        .then((l) => (wakeLock.current = l))
-        .catch(() => {})
-    }
+    if (v) keepAwake()
     if (!v && wakeLock.current) {
       wakeLock.current.release().catch(() => {})
       wakeLock.current = null
@@ -623,6 +654,23 @@ export default function Reader({ id }: { id: string }) {
   }, [])
 
   const toggle = useCallback(() => (playingRef.current ? pause() : play()), [pause, play])
+
+  // Back from another app while reading: take the screen lock again, and wake the voice if the browser paused it.
+  useEffect(() => {
+    const onShow = () => {
+      if (document.visibilityState !== 'visible' || !playingRef.current) return
+      keepAwake()
+      if (speechSynthesis.paused) speechSynthesis.resume()
+      window.setTimeout(() => {
+        if (playingRef.current && !speechSynthesis.speaking && !speechSynthesis.pending) {
+          const p = pos.current
+          speakAt(p.chapter, p.block, p.sent, lastWord.current ?? undefined)
+        }
+      }, 400)
+    }
+    document.addEventListener('visibilitychange', onShow)
+    return () => document.removeEventListener('visibilitychange', onShow)
+  }, [speakAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const repeatSentence = useCallback(() => {
     lastWord.current = null
@@ -1330,7 +1378,10 @@ export default function Reader({ id }: { id: string }) {
                         </option>
                       ))}
                     </select>
-                    <IconButton icon="speaker" label={`Hear the ${LANG_NAMES[lang] || lang} voice`} onClick={() => speakWord(SAMPLES[lang] || SAMPLES.en, lang, chosen?.voiceURI, rateFor(settings, lang))} className="border border-line" />
+                    <IconButton icon="speaker" label={`Hear the ${LANG_NAMES[lang] || lang} voice`} onClick={() => {
+                        pause()
+                        speakWord(SAMPLES[lang] || SAMPLES.en, lang, chosen?.voiceURI, rateFor(settings, lang))
+                      }} className="border border-line" />
                   </div>
                 ) : (
                   <p className="rounded-xl bg-paper-2 px-3 py-2 text-sm text-ink-2">
@@ -1372,7 +1423,10 @@ export default function Reader({ id }: { id: string }) {
                   <span className="min-w-0 flex-1 truncate" dir="auto">
                     <span className="font-semibold">{p.from}</span> <span className="text-ink-3">says</span> {p.to}
                   </span>
-                  <IconButton icon="speaker" label={`Hear ${p.from}`} size={17} onClick={() => speakWord(p.to, meta.lang, settings.voices[meta.lang])} />
+                  <IconButton icon="speaker" label={`Hear ${p.from}`} size={17} onClick={() => {
+                    pause()
+                    speakWord(p.to, meta.lang, settings.voices[meta.lang])
+                  }} />
                   <IconButton
                     icon="trash"
                     label={`Remove ${p.from}`}
