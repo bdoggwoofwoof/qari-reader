@@ -11,6 +11,7 @@ interface Line {
   y: number // from top of page
   size: number
   width: number
+  rtl?: boolean // Arabic, Persian or Hebrew line: x is still its left edge
 }
 
 interface PageLines {
@@ -39,6 +40,43 @@ const clean = (s: string) =>
     .replace(/[­​]/g, '')
     .replace(/\s+/g, ' ')
 
+const RTL_CHAR = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/g
+const LTR_CHAR = /[A-Za-z\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF0-9]/g
+
+/** A line is right-to-left when most of its letters are Arabic or Hebrew script. */
+export function isRtlLine(text: string) {
+  const r = text.match(RTL_CHAR)?.length || 0
+  return r > 0 && r >= (text.match(LTR_CHAR)?.length || 0)
+}
+
+/**
+ * PDFs store right-to-left lines as pieces in visual (left-to-right) order, each piece already in reading order.
+ * Read the pieces from right to left, but keep runs of Latin words and numbers inside the line left to right.
+ */
+export function rtlOrder<T extends { text: string; x: number }>(parts: T[]): T[] {
+  const sorted = [...parts].sort((a, b) => b.x - a.x)
+  const strongLtr = (p: T) => /[A-Za-z\u00C0-\u024F0-9]/.test(p.text) && !/[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/.test(p.text)
+  const neutral = (p: T) => !/[\p{L}\p{N}]/u.test(p.text)
+  const out: T[] = []
+  let i = 0
+  while (i < sorted.length) {
+    if (!strongLtr(sorted[i])) {
+      out.push(sorted[i++])
+      continue
+    }
+    // Extend over neutrals (spaces, dots) only when another Latin piece follows.
+    let j = i
+    let k = i + 1
+    while (k < sorted.length && (strongLtr(sorted[k]) || neutral(sorted[k]))) {
+      if (strongLtr(sorted[k])) j = k
+      k++
+    }
+    out.push(...sorted.slice(i, j + 1).reverse())
+    i = j + 1
+  }
+  return out
+}
+
 async function pageLines(page: pdfjs.PDFPageProxy): Promise<PageLines> {
   const viewport = page.getViewport({ scale: 1 })
   const content = await page.getTextContent()
@@ -52,22 +90,24 @@ async function pageLines(page: pdfjs.PDFPageProxy): Promise<PageLines> {
     if (!cur || !cur.parts.length) return
     // Drop tiny footnote-marker numbers that sit raised inside a line ("word¹").
     const main = median(cur.parts.map((p) => p.size))
+    const rtl = isRtlLine(cur.parts.map((p) => p.text).join(''))
+    const parts = rtl ? rtlOrder(cur.parts) : cur.parts
     let text = ''
-    let prevEnd: number | null = null
-    for (const p of cur.parts) {
+    let prev: { x: number; end: number } | null = null
+    for (const p of parts) {
       if (/^\d{1,3}[a-z]?$/.test(p.text.trim()) && p.size < main * 0.75) continue
-      if (prevEnd !== null && text && !/\s$/.test(text) && !/^\s/.test(p.text)) {
-        const gap = Math.abs(p.x - prevEnd)
+      if (prev && text && !/\s$/.test(text) && !/^\s/.test(p.text)) {
+        const gap = rtl ? Math.min(Math.abs(prev.x - p.end), Math.abs(p.x - prev.end)) : Math.abs(p.x - prev.end)
         if (gap > main * 0.18) text += ' '
       }
       text += p.text
-      prevEnd = p.end
+      prev = p
     }
     text = clean(text).trim()
     if (text) {
       const xs = cur.parts.map((p) => p.x)
       const ends = cur.parts.map((p) => p.end)
-      lines.push({ text, x: Math.min(...xs), y: cur.y, size: main, width: Math.max(...ends) - Math.min(...xs) })
+      lines.push({ text, x: Math.min(...xs), y: cur.y, size: main, width: Math.max(...ends) - Math.min(...xs), rtl })
     }
     cur = null
   }
@@ -125,6 +165,7 @@ function pageBlocks(p: PageLines, pageIndex: number, isNoise: (l: Line, p: PageL
   // Normal line spacing, measured across the whole document so short pages aren't fooled.
   const lineGap = docGap || bodySize * 1.3
   const leftX = median(body.filter((l) => Math.abs(l.size - bodySize) < bodySize * 0.15).map((l) => l.x))
+  const rightX = median(body.filter((l) => Math.abs(l.size - bodySize) < bodySize * 0.15).map((l) => l.x + l.width))
   const fullWidth = Math.max(...body.map((l) => l.width))
 
   const blocks: Block[] = []
@@ -150,7 +191,9 @@ function pageBlocks(p: PageLines, pageIndex: number, isNoise: (l: Line, p: PageL
       const gap = l.y - prev.y
       const sizeChange = Math.abs(l.size - prev.size) > bodySize * 0.18
       const bigGap = gap > lineGap * 1.45 || gap < -lineGap // also a column jump back up
-      const indented = l.x > leftX + bodySize * 1.2 && l.x < leftX + bodySize * 6 && Math.abs(prev.x - leftX) < bodySize
+      const indented = l.rtl
+        ? l.x + l.width < rightX - bodySize * 1.2 && l.x + l.width > rightX - bodySize * 6 && Math.abs(prev.x + prev.width - rightX) < bodySize
+        : l.x > leftX + bodySize * 1.2 && l.x < leftX + bodySize * 6 && Math.abs(prev.x - leftX) < bodySize
       const prevShortEnd = prev.width < fullWidth * 0.72 && /[.!?:"”'’؟。)]$/.test(prev.text)
       if (bigGap || sizeChange || indented || prevShortEnd) push()
     }

@@ -198,6 +198,7 @@ export default function Reader({ id }: { id: string }) {
   const wakeLock = useRef<{ release: () => Promise<void> } | null>(null)
   const warnedLangs = useRef(new Set<string>())
   const lastOwnSave = useRef(0) // when this device last moved the reading position
+  const resumeAfterLookup = useRef(false) // a word was tapped mid-playback: carry on when the lookup closes
   const [elsewhere, setElsewhere] = useState<DocMeta['position'] | null>(null)
 
   const setSleep = (s: Sleep) => {
@@ -214,12 +215,18 @@ export default function Reader({ id }: { id: string }) {
       lastOwnSave.current = d.meta.positionAt ?? d.meta.addedAt
       const p = d.meta.position
       const ch = Math.min(p.chapter, d.content.chapters.length - 1)
+      // Resume at the saved sentence, not just the top of its paragraph.
+      metaRef.current = d.meta
+      contentRef.current = d.content
+      const sents = infoFor(ch, p.block)?.sents || []
+      const si = p.offset > 0 ? Math.max(0, sents.findIndex((s) => p.offset >= s.start && p.offset < s.end)) : 0
       setChapter(ch)
-      pos.current = { chapter: ch, block: p.block, sent: 0 }
-      setHl({ chapter: ch, block: p.block, sent: -1, word: -1 })
+      pos.current = { chapter: ch, block: p.block, sent: si }
+      setHl({ chapter: ch, block: p.block, sent: si > 0 ? si : -1, word: -1 })
       updateDocMeta(id, { openedAt: Date.now() }, 'opened')
       requestAnimationFrame(() => {
-        document.querySelector(`[data-block="${p.block}"]`)?.scrollIntoView({ block: 'start' })
+        const el = (si > 0 && document.querySelector(`[data-sb="${p.block}"][data-si="${si}"]`)) || document.querySelector(`[data-block="${p.block}"]`)
+        el?.scrollIntoView({ block: 'start' })
         window.scrollBy(0, -80)
       })
     })
@@ -230,7 +237,7 @@ export default function Reader({ id }: { id: string }) {
       off()
       sp.stop()
     }
-  }, [id])
+  }, [id]) // eslint-disable-line react-hooks/exhaustive-deps -- infoFor is stable
 
   const infoFor = useCallback((c: number, b: number): BlockInfo | null => {
     const doc = contentRef.current
@@ -405,6 +412,7 @@ export default function Reader({ id }: { id: string }) {
     const info = infoFor(chapter, b)
     const text = content.chapters[chapter].blocks[b]
     if (!info) return
+    resumeAfterLookup.current = playingRef.current
     if (playingRef.current) pause()
     const s1 = info.sents.find((s) => selection.start >= s.start && selection.start < s.end) || { start: 0, end: text.length }
     const s2 = info.sents.find((s) => selection.end > s.start && selection.end <= s.end) || s1
@@ -445,12 +453,13 @@ export default function Reader({ id }: { id: string }) {
       const doc = contentRef.current
       if (!m || !doc) return
       lastOwnSave.current = Date.now()
-      const { chapter: c, block: b } = pos.current
-      const inChapter = doc.chapters[c].blocks.slice(0, b).reduce((n, t) => n + t.length, 0)
+      const { chapter: c, block: b, sent: s } = pos.current
+      const offset = infoFor(c, b)?.sents[s]?.start ?? 0
+      const inChapter = doc.chapters[c].blocks.slice(0, b).reduce((n, t) => n + t.length, 0) + offset
       const progress = m.charCount ? Math.min(1, ((m.charsBefore[c] ?? 0) + inChapter) / m.charCount) : 0
-      savePosition(m.id, { chapter: c, block: b, offset: 0 }, progress)
+      savePosition(m.id, { chapter: c, block: b, offset }, progress)
     }, 800)
-  }, [])
+  }, [infoFor])
 
   // ---------- Playback ----------
   const setPlayingState = (v: boolean) => {
@@ -826,6 +835,7 @@ export default function Reader({ id }: { id: string }) {
     tapTimer.current = window.setTimeout(() => {
       const info = infoFor(chapter, b)
       if (!info) return
+      resumeAfterLookup.current = playingRef.current
       if (playingRef.current) pause()
       const hid = el.dataset.h
       const h = hid ? highlights.find((x) => x.id === hid) : undefined
@@ -841,6 +851,7 @@ export default function Reader({ id }: { id: string }) {
   }
 
   const readFromHere = (p: Picked) => {
+    resumeAfterLookup.current = false
     setPicked(null)
     jumpTo(p.block, p.start)
   }
@@ -1506,7 +1517,13 @@ export default function Reader({ id }: { id: string }) {
         picked={picked}
         source={meta.title}
         voiceURI={picked ? settings.voices[picked.lang] : undefined}
-        onClose={() => setPicked(null)}
+        onClose={() => {
+          setPicked(null)
+          if (resumeAfterLookup.current) {
+            resumeAfterLookup.current = false
+            play()
+          }
+        }}
         onReadFromHere={readFromHere}
         learning={!!picked && settings.learning.includes(picked.lang)}
         translateTo={meta.lang === 'en' && picked?.lang === 'en' ? undefined : 'en'}

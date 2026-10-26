@@ -7,13 +7,20 @@ const GREEK = /[Ͱ-Ͽ]/g
 const LETTER = /\p{L}/gu
 
 const STOPWORDS: Record<string, string[]> = {
-  en: ['the', 'and', 'of', 'to', 'is', 'in', 'that', 'it', 'was', 'for', 'with', 'he', 'she', 'this', 'are', 'not', 'be', 'you', 'they', 'have'],
-  fr: ['le', 'la', 'les', 'et', 'de', 'des', 'est', 'une', 'un', 'que', 'qui', 'dans', 'pour', 'pas', 'il', 'elle', 'du', 'au', 'sur', 'nous', 'vous', 'avec'],
-  de: ['der', 'die', 'das', 'und', 'ist', 'nicht', 'ein', 'eine', 'zu', 'mit', 'den', 'von', 'sich', 'auf', 'ich', 'sie', 'es', 'wir', 'auch', 'dem', 'für'],
+  en: ['the', 'and', 'of', 'to', 'is', 'in', 'that', 'it', 'was', 'for', 'with', 'he', 'she', 'this', 'are', 'not', 'be', 'you', 'they', 'have', 'i', 'a', 'am', 'my', 'what', 'we', 'thank', 'hello'],
+  fr: ['le', 'la', 'les', 'et', 'de', 'des', 'est', 'une', 'un', 'que', 'qui', 'dans', 'pour', 'pas', 'il', 'elle', 'du', 'au', 'sur', 'nous', 'vous', 'avec', 'je', 'tu', 'suis', 'vais', 'bien', 'merci', 'bonjour', 'oui', 'mais', 'très', 'ce', 'cette', 'ne', 'mon', 'ma', 'c', 'j', 'l', 'd', 'qu', 'n'],
+  de: ['der', 'die', 'das', 'und', 'ist', 'nicht', 'ein', 'eine', 'zu', 'mit', 'den', 'von', 'sich', 'auf', 'ich', 'sie', 'es', 'wir', 'auch', 'dem', 'für', 'du', 'bin', 'danke', 'ja', 'nein', 'gut', 'wie', 'hallo', 'mein', 'aber', 'sehr', 'heute'],
   es: ['el', 'la', 'los', 'las', 'y', 'de', 'que', 'en', 'un', 'una', 'es', 'por', 'con', 'para', 'no', 'del', 'se', 'su', 'como', 'pero'],
   it: ['il', 'lo', 'la', 'gli', 'le', 'e', 'di', 'che', 'un', 'una', 'per', 'non', 'con', 'del', 'della', 'sono', 'è', 'nel', 'ma'],
   pt: ['o', 'a', 'os', 'as', 'e', 'de', 'que', 'em', 'um', 'uma', 'para', 'não', 'com', 'do', 'da', 'por', 'se', 'mais', 'no', 'na'],
   nl: ['de', 'het', 'een', 'en', 'van', 'is', 'dat', 'niet', 'op', 'te', 'zijn', 'met', 'voor', 'ik', 'je', 'ze', 'maar', 'ook'],
+}
+
+const LETTER_HINTS: Record<string, RegExp> = {
+  fr: /[çœèêëîïûù]|\b(?:[cdjlnst]|qu)['’]/g,
+  de: /[äöüß]/g,
+  es: /[ñ¿¡]/g,
+  pt: /[ãõ]/g,
 }
 
 function count(text: string, re: RegExp) {
@@ -37,10 +44,14 @@ export function detectLang(text: string, fallback: Lang = 'en'): Lang {
   if (words.length < 3) return fallback
   let best = fallback
   let bestScore = 0
+  const lower = sample.toLowerCase()
   for (const [lang, list] of Object.entries(STOPWORDS)) {
     const set = new Set(list)
     let s = 0
     for (const w of words) if (set.has(w)) s++
+    // Letters only one of these languages uses settle short lines ("Ça va très bien", "Schön, danke").
+    const hint = LETTER_HINTS[lang]
+    if (hint) s += Math.min(3, count(lower, hint)) * 0.5
     if (s > bestScore) {
       bestScore = s
       best = lang
