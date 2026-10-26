@@ -1,4 +1,4 @@
-import { BlobPreconditionFailedError, get, put } from '@vercel/blob'
+import { BlobPreconditionFailedError, del, get, put } from '@vercel/blob'
 
 /**
  * Encrypted sync storage for Qari.
@@ -7,6 +7,7 @@ import { BlobPreconditionFailedError, get, put } from '@vercel/blob'
  *
  *   GET  /api/sync?space=<64 hex>&file=<name>   → the stored bytes (404 if none)
  *   PUT  /api/sync?space=<64 hex>&file=<name>   → stores the body; honours If-Match for safe updates
+ *   DELETE /api/sync?space=<64 hex>&file=<name> → removes a deleted book's file (never the manifest)
  */
 
 const SPACE = /^[0-9a-f]{64}$/
@@ -56,6 +57,16 @@ export default {
         if (e instanceof BlobPreconditionFailedError) return bad(412, 'Changed on another device.')
         return bad(500, 'Could not save.')
       }
+    }
+
+    if (request.method === 'DELETE') {
+      if (file === 'manifest') return bad(400, 'The manifest can’t be deleted.')
+      try {
+        await del(pathname)
+      } catch {
+        /* already gone */
+      }
+      return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } })
     }
 
     return bad(405, 'Method not allowed.')

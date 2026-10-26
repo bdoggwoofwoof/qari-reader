@@ -169,6 +169,7 @@ export default function Reader({ id }: { id: string }) {
   const [tocOpen, setTocOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [sleepOpen, setSleepOpen] = useState(false)
+  const [speedOpen, setSpeedOpen] = useState(false)
   const [sleep, setSleepState] = useState<Sleep>({ kind: 'off' })
   const [now, setNow] = useState(Date.now())
   const [away, setAway] = useState(false)
@@ -605,7 +606,7 @@ export default function Reader({ id }: { id: string }) {
         return
       }
       const sl = sleepRef.current
-      if (sl.kind === 'section' && next.chapter !== sl.chapter) {
+      if (sl.kind === 'section' && next.chapter !== c) {
         setSleep({ kind: 'off' })
         return stopAt(next, 'Sleep timer: stopped at the end of the section.')
       }
@@ -741,10 +742,13 @@ export default function Reader({ id }: { id: string }) {
       firstRestart.current = false
       return
     }
-    if (playingRef.current) {
+    // Wait for the change to settle: dragging the speed slider shouldn't restart the voice at every step.
+    const t = window.setTimeout(() => {
+      if (!playingRef.current) return
       const p = pos.current
       speakAt(p.chapter, p.block, p.sent, lastWord.current ?? undefined)
-    }
+    }, 350)
+    return () => clearTimeout(t)
   }, [restartKey, speakAt])
 
   // ---------- Sleep timer clock ----------
@@ -834,9 +838,10 @@ export default function Reader({ id }: { id: string }) {
   // ---------- Keyboard & lock-screen controls ----------
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
-      if (picked || tocOpen || settingsOpen || sleepOpen) return
+      if (picked || tocOpen || settingsOpen || sleepOpen || speedOpen || viewPage || openHl) return
+      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return // Cmd+R, Alt+← and held keys belong to the browser
       const t = e.target as HTMLElement
-      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable) return
       if (e.code === 'Space') {
         e.preventDefault()
         toggle()
@@ -846,7 +851,7 @@ export default function Reader({ id }: { id: string }) {
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [toggle, step, repeatSentence, picked, tocOpen, settingsOpen, sleepOpen])
+  }, [toggle, step, repeatSentence, picked, tocOpen, settingsOpen, sleepOpen, speedOpen, viewPage, openHl])
 
   useEffect(() => {
     if (!('mediaSession' in navigator) || !meta) return
@@ -1020,12 +1025,15 @@ export default function Reader({ id }: { id: string }) {
       <header className="sticky top-0 z-30 border-b border-line/70 bg-paper/90 pt-[env(safe-area-inset-top)] backdrop-blur">
         <div className="mx-auto flex h-14 max-w-3xl items-center gap-1 px-2">
           <IconButton icon="back" label="Library" onClick={() => go('')} />
-          <button type="button" onClick={() => openPanel('contents')} className="min-w-0 flex-1 rounded-lg px-1 text-left">
-            <div className="truncate text-[0.95rem] font-semibold" dir="auto">
+          <button type="button" onClick={() => openPanel('contents')} className="min-w-0 flex-1 rounded-lg px-1 text-left" aria-label={`Contents: ${meta.title}, ${chapterData.title}`}>
+            <h1 className="truncate text-[0.95rem] font-semibold" dir="auto">
               {meta.title}
-            </div>
-            <div className="truncate text-xs text-ink-3" dir="auto">
-              {chapterData.title}
+            </h1>
+            <div className="flex items-center gap-0.5 text-xs text-ink-3">
+              <span className="truncate" dir="auto">
+                {chapterData.title}
+              </span>
+              <Icon name="chevron" size={14} className="shrink-0" />
             </div>
           </button>
           <IconButton icon="search" label="Search this book" onClick={() => openPanel('search')} />
@@ -1106,7 +1114,7 @@ export default function Reader({ id }: { id: string }) {
         {sectionNewCount > 0 && (
           <div className="mt-10 rounded-2xl border border-line bg-paper-2 px-4 py-3 font-ui text-sm">
             <p className="text-ink-2">
-              <span className="nw rounded px-1 font-semibold text-ink">{sectionNewCount}</span> new {sectionNewCount === 1 ? 'word' : 'words'} in this section. Done with it? Mark
+              <span className="nw-chip rounded px-1 font-semibold text-ink">{sectionNewCount}</span> new {sectionNewCount === 1 ? 'word' : 'words'} in this section. Done with it? Mark
               the ones you didn’t look up as known, so next time only the words you still need stand out.
             </p>
             <button type="button" onClick={markSectionKnown} className="mt-2 h-9 rounded-full bg-moss px-4 font-semibold text-moss-ink">
@@ -1125,7 +1133,7 @@ export default function Reader({ id }: { id: string }) {
       </main>
 
       {/* Player */}
-      <div className="safe-b fixed inset-x-0 bottom-0 z-30 px-3 pt-2">
+      <section aria-label="Player" className="safe-b fixed inset-x-0 bottom-0 z-30 px-3 pt-2">
         {selection && (
           <div className="mb-2 flex justify-center">
             <div className="sheet-in flex items-center gap-1 rounded-full border border-line bg-paper p-1 shadow-[0_4px_18px_rgb(0_0_0/0.14)]" role="toolbar" aria-label="Selected text">
@@ -1211,14 +1219,7 @@ export default function Reader({ id }: { id: string }) {
           <div className="flex items-center justify-between gap-1">
             <button
               type="button"
-              onClick={() => {
-                const i = RATES.findIndex((r) => r >= curRate - 0.01)
-                updateSettings({ rates: { ...settings.rates, [curLang]: RATES[(i + 1) % RATES.length] } })
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault()
-                setSettingsOpen(true)
-              }}
+              onClick={() => setSpeedOpen(true)}
               className="h-11 min-w-14 rounded-full px-2 text-sm font-semibold tabular-nums text-ink-2 hover:bg-paper-2"
               data-tour="speed"
               aria-label={`${LANG_NAMES[curLang] || curLang} speed ${fmtRate(curRate)}×, tap to change`}
@@ -1245,7 +1246,7 @@ export default function Reader({ id }: { id: string }) {
             />
           </div>
         </div>
-      </div>
+      </section>
 
       <BookPanel
         open={tocOpen}
@@ -1260,6 +1261,41 @@ export default function Reader({ id }: { id: string }) {
         onHighlight={onPanelHighlight}
         onHit={onHit}
       />
+
+      <Sheet open={speedOpen} onClose={() => setSpeedOpen(false)} title={`Speed · ${LANG_NAMES[curLang] || curLang}`}>
+        <div className="grid grid-cols-3 gap-2 pb-2">
+          {RATES.map((r) => {
+            const on = Math.abs(r - curRate) < 0.01
+            return (
+              <button
+                key={r}
+                type="button"
+                aria-pressed={on}
+                onClick={() => {
+                  updateSettings({ rates: { ...settings.rates, [curLang]: r } })
+                  setSpeedOpen(false)
+                }}
+                className={`h-12 rounded-xl border font-semibold tabular-nums ${on ? 'border-moss bg-wash text-moss' : 'border-line hover:bg-paper-2'}`}
+              >
+                {fmtRate(r)}×
+              </button>
+            )
+          })}
+        </div>
+        <p className="pb-2 text-sm text-ink-2">
+          {!RATES.some((r) => Math.abs(r - curRate) < 0.01) && `Now ${fmtRate(curRate)}×. `}Each language keeps its own speed.{' '}
+          <button
+            type="button"
+            className="text-moss underline underline-offset-2"
+            onClick={() => {
+              setSpeedOpen(false)
+              setSettingsOpen(true)
+            }}
+          >
+            Fine-tune in reading settings
+          </button>
+        </p>
+      </Sheet>
 
       <Sheet open={sleepOpen} onClose={() => setSleepOpen(false)} title="Sleep timer">
         <div className="grid grid-cols-2 gap-2 pb-2">
@@ -1472,7 +1508,7 @@ export default function Reader({ id }: { id: string }) {
         <section className="mb-6">
           <h3 className="mb-1 font-semibold">Languages you’re learning</h3>
           <p className="mb-2 text-sm text-ink-3">
-            In these, words you haven’t marked known are tinted <span className="nw rounded px-1 text-ink">like this</span> and saved words are{' '}
+            In these, words you haven’t marked known have a <span className="nw text-ink">dotted underline</span> and saved words are{' '}
             <span className="lw text-ink">underlined</span>.
           </p>
           <div className="flex flex-wrap gap-1.5">

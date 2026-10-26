@@ -124,6 +124,15 @@ async function putFile(space: string, file: string, data: Uint8Array, ifMatch?: 
   if (!r.ok) throw new HttpError(r.status, await errorText(r))
 }
 
+/** Removes a file the manifest no longer points to. Best effort: a leftover only costs storage. */
+async function deleteFile(space: string, file: string) {
+  try {
+    await fetchPatiently(`/api/sync?space=${space}&file=${file}`, { method: 'DELETE' })
+  } catch {
+    /* offline: it stays until the next deletion */
+  }
+}
+
 async function errorText(r: Response) {
   try {
     return (await r.json()).error || r.statusText
@@ -197,6 +206,7 @@ async function syncOnce(k: SyncKeys): Promise<{ changedLocal: boolean }> {
     // Books
     const localDocs = new Map((await listDocs()).map((d) => [d.id, d]))
     const docs: Record<string, RemoteDoc> = {}
+    const purge: string[] = [] // stored files of deleted books, removed once the new manifest is saved
     for (const id of new Set([...localDocs.keys(), ...Object.keys(remote.docs)])) {
       const l = localDocs.get(id)
       const r = remote.docs[id]
@@ -205,6 +215,10 @@ async function syncOnce(k: SyncKeys): Promise<{ changedLocal: boolean }> {
         if (l) {
           await deleteDoc(id, { fromSync: true })
           changedLocal = true
+        }
+        if (r) {
+          for (let i = 0; i < r.chunks; i++) purge.push(`c-${id}-${i}`)
+          for (let i = 0; i < (r.fileChunks || 0); i++) purge.push(`f-${id}-${i}`)
         }
         continue
       }
@@ -312,6 +326,7 @@ async function syncOnce(k: SyncKeys): Promise<{ changedLocal: boolean }> {
     try {
       await putFile(k.space, 'manifest', await encryptJSON(k.key, next), remoteFile?.etag)
       lastManifest = next
+      for (const f of purge) await deleteFile(k.space, f)
       return { changedLocal }
     } catch (e) {
       if (e instanceof HttpError && e.status === 412) continue // another device saved first: merge again

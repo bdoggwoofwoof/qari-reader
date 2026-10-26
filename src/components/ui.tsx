@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useId, type ReactNode } from 'react'
 
 const paths: Record<string, ReactNode> = {
   play: <path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none" />,
@@ -37,6 +37,9 @@ const paths: Record<string, ReactNode> = {
   speaker: <path d="M5 9v6h4l5 4V5L9 9zM17 9a4 4 0 010 6" />,
   words: <path d="M5 5h9a3 3 0 013 3v11a2 2 0 00-2-2H5zM17 8h2v11" />,
   download: <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />,
+  chevron: <path d="M7 10l5 5 5-5" />,
+  upload: <path d="M12 15V4M7 9l5-5 5 5M5 20h14" />,
+  more: <path d="M5 12h.01M12 12h.01M19 12h.01" strokeWidth="3" />,
   external: <path d="M14 5h5v5M19 5l-8 8M17 14v5H5V7h5" />,
   paste: <path d="M9 4h6v3H9zM7 5H5v15h14V5h-2" />,
   read: <path d="M5 12h3l2-5 4 10 2-5h3" />,
@@ -95,6 +98,7 @@ export function IconButton({
 
 /** Bottom sheet on phones, centered panel on wider screens. */
 export function Sheet({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; wide?: boolean }) {
+  const titleId = useId()
   useEffect(() => {
     if (!open) return
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -103,14 +107,16 @@ export function Sheet({ open, onClose, title, children, wide }: { open: boolean;
   }, [open, onClose])
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center" role="dialog" aria-modal="true">
-      <button type="button" aria-label="Close" className="absolute inset-0 bg-ink/25" onClick={onClose} />
+    <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <button type="button" aria-label="Close" tabIndex={-1} className="absolute inset-0 bg-ink/25" onClick={onClose} />
       <div
         className={`sheet-in safe-b relative max-h-[85dvh] w-full overflow-y-auto rounded-t-2xl border border-line bg-paper px-5 pt-4 shadow-[0_-8px_40px_rgb(0_0_0/0.12)] sm:rounded-2xl sm:pb-5 ${wide ? 'sm:max-w-xl' : 'sm:max-w-md'}`}
       >
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line sm:hidden" />
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">{title}</h2>
+          <h2 id={titleId} className="text-lg font-semibold">
+            {title}
+          </h2>
           <IconButton icon="close" label="Close" onClick={onClose} className="-mr-2" />
         </div>
         {children}

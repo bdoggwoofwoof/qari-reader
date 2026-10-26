@@ -41,6 +41,17 @@ function db() {
         }
         if (oldVersion < 3) d.createObjectStore('vocab', { keyPath: 'lang' })
       },
+      // Another tab is upgrading, or iOS dropped the connection: open again next time instead of failing forever.
+      blocking(_v, _n, event) {
+        ;(event.target as IDBDatabase).close()
+        dbPromise = null
+      },
+      terminated() {
+        dbPromise = null
+      },
+    })
+    dbPromise.catch(() => {
+      dbPromise = null
     })
   }
   return dbPromise
@@ -216,4 +227,97 @@ export async function listVocab(): Promise<VocabRecord[]> {
 export async function putVocab(rec: VocabRecord, opts: { fromSync?: boolean } = {}) {
   await (await db()).put('vocab', rec)
   if (!opts.fromSync) changed('vocab')
+}
+
+// ---------- Backup ----------
+
+interface Backup {
+  qariBackup: 1
+  createdAt: number
+  docs: DocMeta[]
+  content: DocContent[]
+  words: SavedWord[]
+  highlights: Highlight[]
+  vocab: VocabRecord[]
+  files: { id: string; type: string; base64: string }[]
+}
+
+function blobToBase64(b: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ''))
+    r.onerror = () => reject(r.error)
+    r.readAsDataURL(b)
+  })
+}
+
+/** Everything in the library as one file: books, original PDFs, notes, saved and known words. */
+export async function exportLibrary(): Promise<Blob> {
+  const d = await db()
+  const files = await d.getAll('files')
+  const backup: Backup = {
+    qariBackup: 1,
+    createdAt: Date.now(),
+    docs: await d.getAll('docs'),
+    content: await d.getAll('content'),
+    words: await d.getAll('words'),
+    highlights: await d.getAll('highlights'),
+    vocab: await d.getAll('vocab'),
+    files: await Promise.all(files.map(async (f) => ({ id: f.id, type: f.type, base64: await blobToBase64(f.data) }))),
+  }
+  return new Blob([JSON.stringify(backup)], { type: 'application/json' })
+}
+
+/** Adds what's missing from a backup. Books, words and notes already in the library are left as they are. */
+export async function importLibrary(file: Blob): Promise<{ books: number; words: number }> {
+  let b: Backup
+  try {
+    b = JSON.parse(await file.text())
+  } catch {
+    throw new Error('That file isn’t a Qari backup.')
+  }
+  if (b?.qariBackup !== 1 || !Array.isArray(b.docs)) throw new Error('That file isn’t a Qari backup.')
+  const d = await db()
+  const has = async (store: 'docs' | 'words' | 'highlights', id: string) => !!(await d.getKey(store, id))
+  let books = 0
+  let words = 0
+  const content = new Map(b.content.map((c) => [c.id, c]))
+  const files = new Map(b.files.map((f) => [f.id, f]))
+  for (const meta of b.docs) {
+    const c = content.get(meta.id)
+    if (!c || (await has('docs', meta.id))) continue
+    const f = files.get(meta.id)
+    if (f) {
+      const bytes = Uint8Array.from(atob(f.base64), (ch) => ch.charCodeAt(0))
+      await d.put('files', { id: f.id, type: f.type, data: new Blob([bytes], { type: f.type }) })
+    }
+    await d.put('content', c)
+    await d.put('docs', meta)
+    books++
+  }
+  for (const w of b.words) {
+    if (await has('words', w.id)) continue
+    await d.put('words', w)
+    words++
+  }
+  for (const h of b.highlights) if (!(await has('highlights', h.id))) await d.put('highlights', h)
+  for (const v of b.vocab) {
+    const mine = (await d.get('vocab', v.lang))?.words || {}
+    await d.put('vocab', { lang: v.lang, words: { ...v.words, ...mine } })
+  }
+  changed('docs')
+  changed('words')
+  changed('highlights')
+  changed('vocab')
+  return { books, words }
+}
+
+/** Whether the browser has promised not to clear the library when space runs low. */
+export async function storageIsPersistent(): Promise<boolean | null> {
+  try {
+    if (!navigator.storage?.persisted) return null
+    return (await navigator.storage.persisted()) || (await navigator.storage.persist?.()) || false
+  } catch {
+    return null
+  }
 }

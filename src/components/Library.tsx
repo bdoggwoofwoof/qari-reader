@@ -1,15 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { go } from '../App'
-import { deleteDoc, listDocs, saveDoc, saveFile, updateDocMeta } from '../lib/db'
+import { deleteDoc, exportLibrary, importLibrary, listDocs, saveDoc, saveFile, storageIsPersistent, updateDocMeta } from '../lib/db'
+import { platform } from '../lib/tts'
 import { useSettings } from '../lib/settings'
 import { startTour, useTour } from '../lib/tour'
 import VoiceCheck from './VoiceCheck'
 import SyncSheet from './SyncSheet'
 import { useSyncStatus } from '../lib/sync'
-import { findUrl, importArticle, importFile, importScannedPdf, importScans, importText, isImage } from '../lib/importer'
+import { findUrl, friendlyError, importArticle, importFile, importScannedPdf, importScans, importText, isImage } from '../lib/importer'
 import { NeedsOcrError } from '../lib/extract/errors'
 import { LANG_NAMES, type DocMeta } from '../types'
 import { Icon, IconButton, Sheet } from './ui'
+
+function touredThisSession() {
+  try {
+    return !!sessionStorage.getItem('qari.toured')
+  } catch {
+    return false
+  }
+}
+
+function downloadBackup(blob: Blob) {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `qari-backup-${new Date().toISOString().slice(0, 10)}.json`
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000)
+}
 
 function progress(d: DocMeta) {
   if (d.progress !== undefined) return d.progress
@@ -74,6 +91,11 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
   const [dragging, setDragging] = useState(false)
   const [query, setQuery] = useState('')
   const [renaming, setRenaming] = useState<DocMeta | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [bookMenu, setBookMenu] = useState<DocMeta | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const restoreInput = useRef<HTMLInputElement>(null)
+  const [atRisk, setAtRisk] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const [newFolder, setNewFolder] = useState('')
   const [folder, setFolder] = useState<string | null>(() => {
@@ -103,7 +125,8 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
   const [syncOpen, setSyncOpen] = useState(!!joinCode)
   const tour = useTour()
   const firstRun = !settings.tourDone && !joinCode && !shared
-  const [voicesOpen, setVoicesOpen] = useState(!settings.voiceCheckDone && !joinCode && !firstRun && !tour.active)
+  // The voice check waits for a later visit when the tour has just run, so a new user isn't shown two in a row.
+  const [voicesOpen, setVoicesOpen] = useState(() => !settings.voiceCheckDone && !joinCode && !firstRun && !tour.active && !touredThisSession())
   const sync = useSyncStatus()
   const input = useRef<HTMLInputElement>(null)
 
@@ -113,14 +136,74 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
   useEffect(() => {
     if (firstRun && docs && docs.length === 0 && !tour.active) {
       updateSettings({ tourDone: true })
+      try {
+        sessionStorage.setItem('qari.toured', '1')
+      } catch {
+        /* storage unavailable */
+      }
       startTour()
     }
   }, [firstRun, docs, tour.active, updateSettings])
-  const wasTouring = useRef(tour.active)
+
+  // The library lives only in this browser. Warn once if the browser may clear it (Safari does after a week
+  // or so without a visit unless Qari is on the Home Screen) and nothing else keeps a copy.
   useEffect(() => {
-    if (wasTouring.current && !tour.active && !settings.voiceCheckDone) setVoicesOpen(true)
-    wasTouring.current = tour.active
-  }, [tour.active, settings.voiceCheckDone])
+    if (sync.state !== 'off' || !docs?.length) return
+    try {
+      if (localStorage.getItem('qari.storageWarned')) return
+    } catch {
+      return
+    }
+    const standalone = matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true
+    storageIsPersistent().then((p) => setAtRisk(!standalone && (platform() === 'ios' || p === false)))
+  }, [sync.state, docs?.length])
+  const dismissRisk = () => {
+    setAtRisk(false)
+    try {
+      localStorage.setItem('qari.storageWarned', '1')
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
+  const backUp = async () => {
+    setMenuOpen(false)
+    setBusy({ name: 'your library', p: 0.5, label: 'Preparing a backup of' })
+    try {
+      downloadBackup(await exportLibrary())
+      setNotice('Backup downloaded. Keep it somewhere safe, like iCloud Drive or Google Drive.')
+      dismissRisk()
+    } catch (e) {
+      setError(`Backup: ${friendlyError(e)}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const chooseBackup = () => restoreInput.current?.click()
+
+  const runMenu = (key: 'sync' | 'voices' | 'theme' | 'backup' | 'restore' | 'tour') => {
+    setMenuOpen(false)
+    if (key === 'sync') setSyncOpen(true)
+    else if (key === 'voices') setVoicesOpen(true)
+    else if (key === 'theme') toggleTheme()
+    else if (key === 'backup') backUp()
+    else if (key === 'restore') chooseBackup()
+    else startTour()
+  }
+
+  const restore = async (file: File) => {
+    setBusy({ name: file.name, p: 0.5, label: 'Restoring from' })
+    try {
+      const { books, words } = await importLibrary(file)
+      await refresh()
+      setNotice(books || words ? `Restored ${books} ${books === 1 ? 'book' : 'books'} and ${words} saved ${words === 1 ? 'word' : 'words'}.` : 'Everything in that backup is already in your library.')
+    } catch (e) {
+      setError(`Restore: ${friendlyError(e)}`)
+    } finally {
+      setBusy(null)
+    }
+  }
   useEffect(() => {
     refresh()
     window.addEventListener('qari:synced', refresh)
@@ -161,7 +244,7 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
     return meta.id
   }
 
-  const fail = (name: string, e: unknown) => setError(`${name}: ${e instanceof Error ? e.message : String(e)}`)
+  const fail = (name: string, e: unknown) => setError(`${name}: ${friendlyError(e)}`)
 
   const handleFiles = async (files: FileList | File[]) => {
     setError(null)
@@ -330,12 +413,19 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
           <h1 className="text-lg font-semibold tracking-tight max-[420px]:sr-only">Qari</h1>
         </div>
         <div className="flex items-center gap-1">
-          <span className="relative" data-tour="sync">
+          <button
+            type="button"
+            onClick={() => go('words')}
+            data-tour="words"
+            className="inline-flex h-10 items-center gap-1.5 rounded-full px-3 text-sm font-semibold text-ink-2 hover:bg-paper-2"
+          >
+            <Icon name="words" size={18} /> Words
+          </button>
+          <span className="relative" data-tour="menu">
             <IconButton
-              icon="cloud"
-              label={sync.state === 'off' ? 'Sync between devices' : `Sync: ${sync.state === 'error' ? 'needs attention' : sync.state}`}
-              onClick={() => setSyncOpen(true)}
-              className={sync.state === 'off' ? '' : 'text-moss'}
+              icon="more"
+              label={sync.state === 'error' ? 'More: sync needs attention' : 'More: sync, voices, theme, backup'}
+              onClick={() => setMenuOpen(true)}
             />
             {sync.state !== 'off' && (
               <span
@@ -344,9 +434,6 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
               />
             )}
           </span>
-          <IconButton icon={dark ? 'sun' : 'moon'} label={dark ? 'Light mode' : 'Dark mode'} onClick={toggleTheme} className="max-sm:w-10" tour="theme" />
-          <IconButton icon="speaker" label="Voices on this device" onClick={() => setVoicesOpen(true)} tour="voices" />
-          <IconButton icon="words" label="Saved words" onClick={() => go('words')} tour="words" />
           <button
             type="button"
             onClick={() => setAddOpen(true)}
@@ -379,6 +466,18 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
             e.target.value = ''
           }}
         />
+        <input
+          ref={restoreInput}
+          type="file"
+          accept=".json,application/json"
+          hidden
+          aria-label="Qari backup file"
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) restore(f)
+            e.target.value = ''
+          }}
+        />
       </header>
 
       <main className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
@@ -401,6 +500,36 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
             <button type="button" className="shrink-0 underline" onClick={() => setError(null)}>
               Dismiss
             </button>
+          </div>
+        )}
+
+        {notice && (
+          <div className="mt-4 flex items-start justify-between gap-3 rounded-xl border border-line bg-wash px-4 py-3 text-sm" role="status">
+            <span>{notice}</span>
+            <button type="button" className="shrink-0 underline" onClick={() => setNotice(null)}>
+              OK
+            </button>
+          </div>
+        )}
+        {atRisk && !busy && sync.state === 'off' && !!docs?.length && (
+          <div className="mt-4 rounded-xl border border-line bg-paper-2 px-4 py-3 text-sm" role="note">
+            <p className="font-semibold">Your library is only on this device</p>
+            <p className="mt-1 text-ink-2">
+              {platform() === 'ios'
+                ? 'Safari can clear it if you don’t open Qari for a while. Add Qari to your Home Screen (Share › Add to Home Screen), turn on sync, or keep a backup.'
+                : 'The browser can clear it when the device runs low on space. Turn on sync, install Qari as an app, or keep a backup.'}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              <button type="button" className="font-semibold text-moss underline underline-offset-2" onClick={() => setSyncOpen(true)}>
+                Turn on sync
+              </button>
+              <button type="button" className="font-semibold text-moss underline underline-offset-2" onClick={backUp}>
+                Download a backup
+              </button>
+              <button type="button" className="text-ink-2 underline underline-offset-2" onClick={dismissRisk}>
+                Not now
+              </button>
+            </div>
           </div>
         )}
 
@@ -489,33 +618,24 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
                           {d.vocab.fresh === 0 ? 'No new words' : `${d.vocab.fresh} new ${d.vocab.fresh === 1 ? 'word' : 'words'} (${Math.round((d.vocab.fresh / d.vocab.unique) * 100)}%)`}
                         </span>
                       )}
+                      <span>{p > 0.995 ? 'Finished' : p > 0.005 ? `${Math.round(p * 100)}% read` : 'Not started'}</span>
                       <span>Opened {ago(d.openedAt)}</span>
                     </div>
                     <div className="mt-2.5 h-[3px] w-full max-w-xs overflow-hidden rounded-full bg-line" aria-label={`${Math.round(p * 100)}% read`}>
                       <div className="h-full bg-moss" style={{ width: `${Math.max(p * 100, 1.5)}%` }} />
                     </div>
                   </a>
-                  <IconButton
-                    icon="pencil"
-                    label={`Edit ${d.title}`}
-                    onClick={() => {
-                      setRenaming(d)
-                      setNewTitle(d.title)
-                      setNewFolder(d.folder || '')
-                    }}
-                    className="opacity-60 group-hover:opacity-100"
-                  />
-                  <IconButton icon="trash" label={`Remove ${d.title}`} onClick={() => remove(d)} className="-ml-2 opacity-60 group-hover:opacity-100" />
+                  <IconButton icon="more" label={`Options for ${d.title}`} onClick={() => setBookMenu(d)} className="text-ink-2" />
                 </li>
               )
             })}
           </ul>
         )}
         {docs && docs.length > 0 && <p className="mt-4 text-center text-sm text-ink-3">Drop PDFs, EPUBs, Word files or photos of pages anywhere here to add them.</p>}
-        {docs && (
+        {empty && (
           <p className="mt-3 text-center text-sm">
-            <button type="button" onClick={startTour} className="text-moss underline underline-offset-2">
-              Take the tour
+            <button type="button" onClick={chooseBackup} className="text-moss underline underline-offset-2">
+              Restore from a backup
             </button>
           </p>
         )}
@@ -657,6 +777,65 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
       <SyncSheet open={syncOpen} onClose={() => setSyncOpen(false)} joinCode={joinCode} />
 
       <VoiceCheck open={voicesOpen} onClose={() => setVoicesOpen(false)} />
+
+      <Sheet open={menuOpen} onClose={() => setMenuOpen(false)} title="Qari">
+        <div className="grid gap-1 pb-2">
+          {(
+            [
+              ['sync', 'cloud', 'Sync between devices', sync.state === 'off' ? 'Off · keep your phone and laptop the same' : `On · ${sync.state === 'error' ? 'needs attention' : sync.state}`],
+              ['voices', 'speaker', 'Voices on this device', 'Check each language and pick a voice'],
+              ['theme', dark ? 'sun' : 'moon', dark ? 'Light mode' : 'Dark mode', 'Sepia and text size are in reading settings'],
+              ['backup', 'download', 'Download a backup', 'Every book, note and saved word in one file'],
+              ['restore', 'upload', 'Restore from a backup', 'Adds anything missing; keeps what’s here'],
+              ['tour', 'read', 'Take the tour', 'A quick look at where everything is'],
+            ] as const
+          ).map(([key, icon, title, hint]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => runMenu(key)}
+              className="flex items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-paper-2"
+            >
+              <Icon name={icon} size={20} className={icon === 'cloud' && sync.state !== 'off' ? 'text-moss' : 'text-ink-2'} />
+              <span>
+                <span className="block font-semibold">{title}</span>
+                <span className="text-sm text-ink-2">{hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </Sheet>
+
+      <Sheet open={!!bookMenu} onClose={() => setBookMenu(null)} title={<span dir="auto">{bookMenu?.title}</span>}>
+        <div className="grid gap-1 pb-2">
+          <button
+            type="button"
+            onClick={() => {
+              const d = bookMenu!
+              setBookMenu(null)
+              setRenaming(d)
+              setNewTitle(d.title)
+              setNewFolder(d.folder || '')
+            }}
+            className="flex items-center gap-3 rounded-xl px-3 py-3 text-left hover:bg-paper-2"
+          >
+            <Icon name="pencil" size={20} className="text-ink-2" />
+            <span className="font-semibold">Rename or move to a folder</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const d = bookMenu!
+              setBookMenu(null)
+              remove(d)
+            }}
+            className="flex items-center gap-3 rounded-xl px-3 py-3 text-left text-danger hover:bg-paper-2"
+          >
+            <Icon name="trash" size={20} />
+            <span className="font-semibold">Remove from library</span>
+          </button>
+        </div>
+      </Sheet>
 
       <Sheet open={!!renaming} onClose={() => setRenaming(null)} title="Edit details">
         <form

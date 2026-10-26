@@ -8,6 +8,16 @@ function uid() {
 
 export type Progress = (p: number, label?: string) => void
 
+/** File names like "scan0003", "document (2)" or "ar" say nothing: use the document's first heading instead. */
+export function betterTitle(ex: Pick<Extracted, 'chapters'>, fileName: string) {
+  const generic = fileName.trim().length <= 4 || /^(scan|document|doc|file|untitled|img|image|download|print|new|copy)[\s_-]*\(?\d*\)?$/i.test(fileName.trim()) || /^[\d\s_()-]+$/.test(fileName)
+  if (!generic) return fileName
+  const c = ex.chapters[0]
+  const first = c?.headings?.find((i) => i < 5)
+  const heading = first !== undefined ? c.blocks[first]?.trim() : undefined
+  return heading && heading.length >= 3 && heading.length <= 120 ? heading : fileName
+}
+
 function finish(ex: Extracted, kind: DocMeta['kind'], fallbackTitle: string, extra: Partial<DocMeta> = {}): { meta: DocMeta; content: DocContent } {
   const id = uid()
   const sample = ex.chapters
@@ -24,7 +34,7 @@ function finish(ex: Extracted, kind: DocMeta['kind'], fallbackTitle: string, ext
     total += c.blocks.reduce((n, b) => n + b.length, 0)
   }
   const now = Date.now()
-  const title = ex.title && !/^untitled|^microsoft word|\.docx?$/i.test(ex.title) ? ex.title : fallbackTitle
+  const title = ex.title && !/^untitled|^microsoft word|\.docx?$/i.test(ex.title) ? ex.title : betterTitle(ex, fallbackTitle)
   return {
     meta: {
       id,
@@ -138,4 +148,18 @@ export function importText(text: string, title?: string) {
 /** The first web address in some shared or pasted text, if any. */
 export function findUrl(text: string) {
   return text.match(/https?:\/\/[^\s<>"'“”]+[^\s<>"'“”.,;:!?)\]]/i)?.[0] || null
+}
+
+/** Turns the errors that libraries and the browser throw into something a reader can act on. */
+export function friendlyError(e: unknown): string {
+  const name = (e as { name?: string })?.name || ''
+  const msg = e instanceof Error ? e.message : String(e)
+  if (name === 'PasswordException' || /password/i.test(msg))
+    return 'This PDF is password-protected. Open it, remove the password (or print it to a new PDF), then add that file.'
+  if (name === 'InvalidPDFException' || /invalid pdf/i.test(msg)) return 'This file isn’t a readable PDF. It may be damaged or only partly downloaded.'
+  if (/corrupted zip|end of central directory|end of data reached|is this a zip file/i.test(msg))
+    return 'This file seems damaged, or isn’t really an EPUB or Word file. Try downloading it again.'
+  if (name === 'QuotaExceededError' || /quota/i.test(msg))
+    return 'This device has run out of space for Qari. Remove some books (PDFs take the most room) and try again.'
+  return msg
 }

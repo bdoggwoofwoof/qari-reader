@@ -22,7 +22,7 @@
   --paper-2: #e3e8e1;
   --ink: #1c2621;
   --ink-2: #4a5850;
-  --ink-3: #7d8a82;
+  --ink-3: #5b6760; /* 4.5:1 or better on paper and paper-2 */
   --moss: #33604a;
   --moss-ink: #f2f6f2;
   --line: #c9d1c8;
@@ -40,7 +40,7 @@
   --paper-2: #e8dcc4;
   --ink: #34281c;
   --ink-2: #5e4d3b;
-  --ink-3: #8c7a66;
+  --ink-3: #6d5c48;
   --moss: #5b6b3a;
   --moss-ink: #f7f1e4;
   --line: #d6c7aa;
@@ -53,7 +53,7 @@
   --paper-2: #1c2420;
   --ink: #dbe3dc;
   --ink-2: #a6b2aa;
-  --ink-3: #6f7c74;
+  --ink-3: #87948c;
   --moss: #7fb394;
   --moss-ink: #0f1512;
   --line: #2c3631;
@@ -238,18 +238,23 @@ input[type='range'] {
 }
 
 /* Words you haven't marked known, in languages you're learning (a soft tint keeps Arabic dots clear). */
+/* New words: a quiet dotted underline, so a page that's all new doesn't turn into a wall of tint.
+   skip-ink keeps the line clear of Arabic dots and descenders. */
 .nw {
+  text-decoration: underline dotted color-mix(in srgb, var(--moss) 70%, transparent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.28em;
+  text-decoration-skip-ink: auto;
+}
+.nw-chip {
   background: color-mix(in srgb, var(--moss) 13%, transparent);
-  border-radius: 3px;
 }
 /* Saved words you're still learning. */
 .lw {
   box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--mark) 90%, var(--ink) 10%);
 }
 /* Keep the spoken word and saved highlights on top of the new-word tint. */
-.hl.nw {
-  background: color-mix(in srgb, var(--mark) 45%, transparent);
-}
+
 .w.now.nw {
   background: linear-gradient(180deg, transparent 14%, var(--mark) 14%, var(--mark) 88%, transparent 88%);
 }

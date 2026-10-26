@@ -17,3 +17,17 @@ describe('detectLang', () => {
     expect(detectLang(text, 'en')).toBe(lang)
   })
 })
+
+import { betterTitle } from '../src/lib/importer'
+
+describe('betterTitle', () => {
+  const ex = { chapters: [{ title: 'x', blocks: ['الدرس الأول', 'نص'], headings: [0] }] }
+  it('uses the first heading when the file name says nothing', () => {
+    expect(betterTitle(ex, 'ar')).toBe('الدرس الأول')
+    expect(betterTitle(ex, 'scan0003')).toBe('الدرس الأول')
+    expect(betterTitle(ex, 'document (2)')).toBe('الدرس الأول')
+  })
+  it('keeps a meaningful file name', () => {
+    expect(betterTitle(ex, 'Smith 2019 - Urban Ecology')).toBe('Smith 2019 - Urban Ecology')
+  })
+})

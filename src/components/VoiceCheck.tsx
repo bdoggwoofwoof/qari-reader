@@ -63,7 +63,7 @@ export default function VoiceCheck({ open, onClose }: { open: boolean; onClose: 
       )}
       <p className="mt-4 text-sm text-ink-3">You can choose a different voice for each language under Reading settings while reading.</p>
       <button type="button" onClick={close} className="mt-4 mb-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-moss font-semibold text-moss-ink">
-        <Icon name="read" size={18} /> Start reading
+        <Icon name="check" size={18} /> Done
       </button>
     </Sheet>
   )

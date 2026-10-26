@@ -77,15 +77,19 @@ export default function Words() {
         <div className="mx-auto flex h-14 max-w-3xl items-center gap-1 px-2">
           <IconButton icon="back" label="Back" onClick={() => (history.length > 1 ? history.back() : go(''))} />
           <h1 className="flex-1 text-[0.95rem] font-semibold">Saved words</h1>
-          <IconButton icon="download" label="Export a file for Anki" onClick={exportAnki} disabled={!shown.length} />
-          <button
-            type="button"
-            onClick={sendNow}
-            disabled={!unsent.length || send.kind === 'sending'}
-            className="mr-1 inline-flex h-10 items-center gap-1.5 rounded-full bg-moss px-4 text-sm font-semibold text-moss-ink hover:opacity-90 disabled:opacity-40"
-          >
-            <Icon name="anki" size={17} /> {send.kind === 'sending' ? 'Sending…' : unsent.length ? `Send ${unsent.length} to Anki` : 'All in Anki'}
-          </button>
+          {!!list?.length && (
+            <>
+              <IconButton icon="download" label="Export a file for Anki" onClick={exportAnki} disabled={!shown.length} />
+              <button
+                type="button"
+                onClick={sendNow}
+                disabled={!unsent.length || send.kind === 'sending'}
+                className="mr-1 inline-flex h-10 items-center gap-1.5 rounded-full bg-moss px-4 text-sm font-semibold text-moss-ink hover:opacity-90 disabled:opacity-40"
+              >
+                <Icon name="anki" size={17} /> {send.kind === 'sending' ? 'Sending…' : unsent.length ? `Send ${unsent.length} to Anki` : 'All in Anki'}
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -111,29 +115,29 @@ export default function Words() {
           <div className="mt-4 rounded-xl border border-line bg-paper-2 px-4 py-3 text-sm" role="alert">
             {send.reason === 'phone' ? (
               <>
-                <p className="font-semibold">Sending to Anki works from your computer.</p>
-                <p className="mt-1 text-ink-2">
-                  It uses the AnkiConnect add-on in Anki on your computer. With sync on, the words you save here appear in Qari on your laptop; open them there and tap Send to
-                  Anki. They’re marked as sent, so nothing is added twice. To add them on this phone instead, use the download button to export a file and import it in
-                  AnkiMobile or AnkiDroid.
-                </p>
+                  <p className="font-semibold">Sending to Anki works from your computer.</p>
+                  <p className="mt-1 text-ink-2">
+                    It uses the AnkiConnect add-on in Anki on your computer. With sync on, the words you save here appear in Qari on your laptop; open them there and tap Send to
+                    Anki. They’re marked as sent, so nothing is added twice. To add them on this phone instead, use the download button to export a file and import it in
+                    AnkiMobile or AnkiDroid.
+                  </p>
               </>
             ) : send.reason === 'denied' ? (
               <>
-                <p className="font-semibold">Anki said no to Qari.</p>
-                <p className="mt-1 text-ink-2">Tap Send again and choose Yes when Anki asks whether to allow this site.</p>
+                  <p className="font-semibold">Anki said no to Qari.</p>
+                  <p className="mt-1 text-ink-2">Tap Send again and choose Yes when Anki asks whether to allow this site.</p>
               </>
             ) : (
               <>
-                <p className="font-semibold">Qari couldn’t reach Anki on this computer.</p>
-                <ol className="mt-1 list-decimal space-y-1 pl-5 text-ink-2">
-                  <li>
-                    Open Anki. Once only: Tools › Add-ons › Get Add-ons…, enter <span className="font-mono font-semibold text-ink">2055492159</span> (AnkiConnect) and restart Anki.
-                  </li>
-                  <li>Tap Send to Anki again. Anki asks whether to allow this site: choose Yes.</li>
-                  <li>If the browser asks to let this site reach devices on your local network, allow it.</li>
-                </ol>
-                <p className="mt-2 text-ink-3">Still stuck? Chrome and Edge work best for this. Or use the download button to export a file and import it in Anki.</p>
+                  <p className="font-semibold">Qari couldn’t reach Anki on this computer.</p>
+                  <ol className="mt-1 list-decimal space-y-1 pl-5 text-ink-2">
+                    <li>
+                      Open Anki. Once only: Tools › Add-ons › Get Add-ons…, enter <span className="font-mono font-semibold text-ink">2055492159</span> (AnkiConnect) and restart Anki.
+                    </li>
+                    <li>Tap Send to Anki again. Anki asks whether to allow this site: choose Yes.</li>
+                    <li>If the browser asks to let this site reach devices on your local network, allow it.</li>
+                  </ol>
+                  <p className="mt-2 text-ink-3">Still stuck? Chrome and Edge work best for this. Or use the download button to export a file and import it in Anki.</p>
               </>
             )}
             <button type="button" className="mt-2 text-ink-3 underline" onClick={() => setSend({ kind: 'idle' })}>
@@ -164,38 +168,40 @@ export default function Words() {
           </div>
         )}
 
-        <ul className="mt-4 divide-y divide-line border-y border-line">
-          {shown.map((w) => {
-            const rtl = RTL_LANGS.has(w.lang)
-            return (
-              <li key={w.id} className="group flex gap-2 py-4">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline gap-x-3">
-                    <span dir={rtl ? 'rtl' : 'ltr'} lang={w.lang} className={rtl ? 'font-arabic text-2xl' : 'font-read text-xl'}>
-                      {w.word}
-                    </span>
-                    {w.lemma && <span className="text-sm text-ink-3">from {w.lemma}</span>}
-                    <span className="text-xs text-ink-3">{LANG_NAMES[w.lang] || w.lang}</span>
-                    {w.ankiAt && (
-                      <span className="inline-flex items-center gap-0.5 text-xs text-moss">
-                        <Icon name="check" size={12} /> In Anki
+        {shown.length > 0 && (
+          <ul className="mt-4 divide-y divide-line border-y border-line">
+            {shown.map((w) => {
+              const rtl = RTL_LANGS.has(w.lang)
+              return (
+                <li key={w.id} className="group flex gap-2 py-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-baseline gap-x-3">
+                      <span dir={rtl ? 'rtl' : 'ltr'} lang={w.lang} className={rtl ? 'font-arabic text-2xl' : 'font-read text-xl'}>
+                        {w.word}
                       </span>
-                    )}
+                      {w.lemma && <span className="text-sm text-ink-3">from {w.lemma}</span>}
+                      <span className="text-xs text-ink-3">{LANG_NAMES[w.lang] || w.lang}</span>
+                      {w.ankiAt && (
+                        <span className="inline-flex items-center gap-0.5 text-xs text-moss">
+                          <Icon name="check" size={12} /> In Anki
+                        </span>
+                      )}
+                    </div>
+                    {w.definition && <p className="mt-1 whitespace-pre-line text-sm text-ink-2">{w.definition}</p>}
+                    <p dir="auto" className="mt-2 font-read text-[0.95rem] leading-relaxed text-ink-2">
+                      {w.sentence}
+                    </p>
+                    <p className="mt-1 truncate text-xs text-ink-3">{w.source}</p>
                   </div>
-                  {w.definition && <p className="mt-1 whitespace-pre-line text-sm text-ink-2">{w.definition}</p>}
-                  <p dir="auto" className="mt-2 font-read text-[0.95rem] leading-relaxed text-ink-2">
-                    {w.sentence}
-                  </p>
-                  <p className="mt-1 truncate text-xs text-ink-3">{w.source}</p>
-                </div>
-                <div className="flex flex-col">
-                  <IconButton icon="speaker" label={`Hear ${w.word}`} onClick={() => speakWord(w.word, w.lang, settings.voices[w.lang])} />
-                  <IconButton icon="trash" label={`Delete ${w.word}`} onClick={() => remove(w.id)} className="opacity-60 group-hover:opacity-100" />
-                </div>
-              </li>
-            )
-          })}
-        </ul>
+                  <div className="flex flex-col">
+                    <IconButton icon="speaker" label={`Hear ${w.word}`} onClick={() => speakWord(w.word, w.lang, settings.voices[w.lang])} />
+                    <IconButton icon="trash" label={`Delete ${w.word}`} onClick={() => remove(w.id)} className="opacity-60 group-hover:opacity-100" />
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
 
         {langs.length > 0 && (
           <details className="mt-6 rounded-xl border border-line px-4 py-3 text-sm">

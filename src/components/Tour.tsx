@@ -16,20 +16,12 @@ interface Step {
 const words = () => document.querySelectorAll('main.prose-read p')[1] || document.querySelector('main.prose-read p')
 
 const STEPS: Step[] = [
-  { where: 'library', title: 'Welcome to Qari', body: 'Qari reads your books, articles and class readings aloud, and lets you look up any word as you listen. Here’s where everything is.' },
+  { where: 'library', title: 'Welcome to Qari', body: 'Qari reads your books, articles and class readings aloud, and lets you look up any word as you listen. Five quick things to know.' },
   { where: 'library', target: '[data-tour=add]', title: 'Add something to read', body: 'PDFs, EPUBs, Word files, web links, pasted text, or photos of printed pages.' },
-  { where: 'library', target: '[data-tour=sync]', title: 'Sync your devices', body: 'Keep your books, place, notes and saved words the same on your phone and laptop. Everything is encrypted before it leaves your device.' },
-  { where: 'library', target: '[data-tour=theme]', title: 'Light or dark', body: 'Switch with one tap. Sepia and text size are in the reading settings.' },
-  { where: 'library', target: '[data-tour=voices]', title: 'Voices', body: 'Pick the voice for each language and hear how it sounds. Qari uses the voices already on your device, for free.' },
-  { where: 'library', target: '[data-tour=words]', title: 'Saved words', body: 'Words you save while reading land here, with the sentence they came from. Send them to Anki or export them.' },
-  { where: 'reader', target: words, title: 'Tap any word', body: 'Tap a word to see what it means; reading pauses while you look. Double-tap to start reading from that word. Select a few words to highlight, add a note or translate.' },
-  { where: 'reader', target: '[data-tour=play]', title: 'Play and pause', body: 'The sentence being read is tinted and each word lights up as it’s spoken. Skip back or ahead a sentence on either side.' },
-  { where: 'reader', target: '[data-tour=speed]', title: 'Speed', body: 'Tap to change how fast it reads. Each language keeps its own speed.' },
-  { where: 'reader', target: '[aria-label="Position in section"]', title: 'Where you are', body: 'Shows the time left in this section. Tap anywhere on the bar to jump there.' },
-  { where: 'reader', target: '[aria-label^="Contents and"]', title: 'Contents and notes', body: 'Jump to a chapter, and see every highlight and note in this book. Copy them as quotes with page numbers.' },
-  { where: 'reader', target: '[aria-label="Search this book"]', title: 'Search', body: 'Find any word in the book, even without accents or Arabic vowel marks.' },
-  { where: 'reader', target: '[aria-label="Reading settings"]', title: 'Reading settings', body: 'Voices, speeds, text size, theme, Arabic font, and the languages you’re learning, so new words get marked.' },
-  { where: 'reader', target: '[aria-label="Library"]', title: 'Back to your library', body: 'That’s the tour. This sample stays in your library until you remove it. You can take the tour again from the bottom of the library.' },
+  { where: 'library', target: '[data-tour=menu]', title: 'Sync, voices and backup', body: 'Keep your phone and laptop in step (encrypted), check which languages this device can read aloud, switch to dark mode, or download a backup.' },
+  { where: 'reader', target: words, title: 'Tap any word', body: 'Tap a word to see what it means: reading pauses and carries on when you close it. Double-tap to read from that word. Select a few words to highlight, add a note or translate.' },
+  { where: 'reader', target: '[data-tour=play]', title: 'Play, speed and skip', body: 'The sentence being read is tinted and each word lights up as it’s spoken. Tap the speed on the left to change it; each language keeps its own.' },
+  { where: 'reader', target: '[aria-label="Reading settings"]', title: 'Everything else is up here', body: 'Search, contents and notes, and reading settings (voices, text size, Arabic font). Take this tour again from the ⋯ menu in your library.' },
 ]
 
 const SAMPLE = `This is a short sample so you can try Qari. Press play and listen: the sentence being read is tinted, and each word lights up as it is spoken.
@@ -208,7 +200,7 @@ export default function Tour() {
               </button>
             )}
             <button type="button" onClick={() => move(1)} className="h-10 rounded-full bg-moss px-5 text-sm font-semibold text-moss-ink hover:opacity-90">
-              {last ? 'Done' : step === 5 ? 'Open a sample' : step === 0 ? 'Show me' : 'Next'}
+              {last ? 'Done' : STEPS[step + 1]?.where === 'reader' && s.where === 'library' ? 'Open a sample' : step === 0 ? 'Show me' : 'Next'}
             </button>
           </div>
         </div>

@@ -256,6 +256,15 @@ export async function openPdf(data: ArrayBuffer) {
 
 export async function extractPdf(data: ArrayBuffer, onProgress?: (p: number) => void): Promise<Extracted> {
   const task = pdfjs.getDocument({ data: new Uint8Array(data) })
+  try {
+    return await extractFrom(task, onProgress)
+  } catch (e) {
+    task.destroy().catch(() => {}) // a failed import mustn't leave the PDF worker holding the file
+    throw e
+  }
+}
+
+async function extractFrom(task: pdfjs.PDFDocumentLoadingTask, onProgress?: (p: number) => void): Promise<Extracted> {
   const doc = await task.promise
   const pages: PageLines[] = []
   for (let i = 1; i <= doc.numPages; i++) {
