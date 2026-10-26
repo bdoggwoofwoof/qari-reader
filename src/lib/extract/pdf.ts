@@ -315,7 +315,7 @@ export async function extractPdf(data: ArrayBuffer, onProgress?: (p: number) => 
     outline.length > 0
       ? outline.map((o, i) => ({ title: o.title, from: i === 0 ? 0 : o.page, to: outline[i + 1]?.page ?? Infinity }))
       : Array.from({ length: Math.ceil(doc.numPages / 10) }, (_, i) => ({
-          title: `Pages ${label(i * 10)}–${label(Math.min((i + 1) * 10, doc.numPages) - 1)}`,
+          title: i * 10 === Math.min((i + 1) * 10, doc.numPages) - 1 ? `Page ${label(i * 10)}` : `Pages ${label(i * 10)}–${label(Math.min((i + 1) * 10, doc.numPages) - 1)}`,
           from: i * 10,
           to: (i + 1) * 10,
         }))

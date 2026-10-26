@@ -825,18 +825,24 @@ export default function Reader({ id }: { id: string }) {
     const prev = lastTap.current
     if (prev && prev.b === b && prev.s === start && t - prev.t < 320) {
       if (tapTimer.current) clearTimeout(tapTimer.current)
+      tapTimer.current = null
       lastTap.current = null
+      resumeAfterLookup.current = false
       window.getSelection()?.removeAllRanges()
       jumpTo(b, start)
       return
     }
     lastTap.current = { b, s: start, t }
+    // Stop the voice at once, so it doesn't read on (or turn the page) while we wait to see if this is a double tap.
+    if (playingRef.current) {
+      resumeAfterLookup.current = true
+      pause()
+    } else if (!tapTimer.current) resumeAfterLookup.current = false
     if (tapTimer.current) clearTimeout(tapTimer.current)
     tapTimer.current = window.setTimeout(() => {
+      tapTimer.current = null
       const info = infoFor(chapter, b)
       if (!info) return
-      resumeAfterLookup.current = playingRef.current
-      if (playingRef.current) pause()
       const hid = el.dataset.h
       const h = hid ? highlights.find((x) => x.id === hid) : undefined
       if (h) {
@@ -1024,7 +1030,7 @@ export default function Reader({ id }: { id: string }) {
             <div key={b} className="relative">
               {newPage && label && (
                 <div
-                  className={`pg select-none ${canShowOriginal ? 'cursor-pointer' : ''}`}
+                  className={`pg select-none ${RTL_LANGS.has(blockInfos[b]?.lang) ? 'pg-rtl' : ''} ${canShowOriginal ? 'cursor-pointer' : ''}`}
                   data-page={pi}
                   data-label={label}
                   title={canShowOriginal ? 'Show the original page' : undefined}
