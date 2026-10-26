@@ -162,11 +162,14 @@ export async function lookup(word: string, lang: Lang): Promise<LookupResult> {
 export function externalLinks(word: string, lang: Lang, sentence: string) {
   const w = lang === 'ar' ? stripArabicMarks(word) : word
   const enc = encodeURIComponent(w)
-  const links: { label: string; url: string }[] = [
+  // `copy`: the site has no link to a search, so the word goes on the clipboard to paste into its search box.
+  const links: { label: string; url: string; copy?: string }[] = [
     { label: 'Wiktionary', url: `https://en.wiktionary.org/wiki/${enc}#${WIKI_LANG_NAME[lang] || ''}` },
   ]
   if (lang === 'ar') {
     links.push({ label: 'Almaany', url: `https://www.almaany.com/en/dict/ar-en/${enc}/` })
+    // Levantine and Egyptian dictionaries (the Living Arabic Project). Searches work best without vowel marks.
+    links.push({ label: 'Lughatuna', url: 'https://livingarabic.com/', copy: w })
   } else if (lang === 'fr' || lang === 'de' || lang === 'es' || lang === 'it' || lang === 'pt') {
     links.push({ label: 'WordReference', url: `https://www.wordreference.com/${lang}en/${enc}` })
   } else if (lang === 'en') {

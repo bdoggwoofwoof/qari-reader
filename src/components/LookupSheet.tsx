@@ -62,6 +62,7 @@ export default function LookupSheet({
   const [saved, setSaved] = useState(false)
   const [tPhrase, setTPhrase] = useState<TState>({ status: 'idle' })
   const [tSentence, setTSentence] = useState<TState>({ status: 'idle' })
+  const [copied, setCopied] = useState<string | null>(null)
   useVocab(learning && picked ? [picked.lang] : [])
 
   const phrase = !!picked && /\s/.test(picked.word.trim())
@@ -73,6 +74,7 @@ export default function LookupSheet({
       setSaved(false)
       setTPhrase({ status: 'idle' })
       setTSentence({ status: 'idle' })
+      setCopied(null)
     }
   }, [picked])
 
@@ -266,11 +268,29 @@ export default function LookupSheet({
         {externalLinks(picked.word, lang, picked.sentence)
           .filter((l) => l.label !== 'Translate sentence')
           .map((l) => (
-            <a key={l.label} href={l.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-moss underline-offset-2 hover:underline">
+            <a
+              key={l.label}
+              href={l.url}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => {
+                if (!l.copy) return
+                navigator.clipboard?.writeText(l.copy).then(
+                  () => setCopied(l.copy!),
+                  () => setCopied(null),
+                )
+              }}
+              className="inline-flex items-center gap-1 text-moss underline-offset-2 hover:underline"
+            >
               {l.label} <Icon name="external" size={14} />
             </a>
           ))}
       </div>
+      {copied && (
+        <p className="mt-2 text-sm text-ink-2" aria-live="polite">
+          Copied <span lang="ar" dir="rtl" className="font-semibold">{copied}</span> — paste it into Lughatuna’s search box.
+        </p>
+      )}
     </Sheet>
   )
 }
