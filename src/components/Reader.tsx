@@ -266,6 +266,13 @@ export default function Reader({ id }: { id: string }) {
   const markAt = useRef(0) // when the placemark last moved
   const handScrolledAt = useRef(0) // when you last scrolled by hand
   const chapterRef = useRef(0)
+  // Placemark following your scrolling: not asked yet, asking, yes, or no (for this visit to the book).
+  const [follow, setFollowState] = useState<'unknown' | 'asking' | 'on' | 'off'>('unknown')
+  const followRef = useRef(follow)
+  const setFollow = (f: typeof follow) => {
+    followRef.current = f
+    setFollowState(f)
+  }
   chapterRef.current = chapter
   const lastTap = useRef<{ b: number; s: number; t: number } | null>(null)
   const tappedWord = useRef<{ b: number; start: number; end: number } | null>(null)
@@ -570,17 +577,12 @@ export default function Reader({ id }: { id: string }) {
   }, [writePosition])
 
   /**
-   * Reading by scrolling (no voice): if you scrolled away from the placemark and leave the book there,
-   * the placemark moves to the first sentence at the top of the screen, so you come back to where you were looking.
+   * Reading by scrolling (no voice), once you've said yes to "follow along": the placemark moves to the first
+   * sentence at the top of the screen. Scrolling ahead to look for something never moves it unless you said yes.
    */
   const placeFromScroll = useCallback(() => {
-    if (playingRef.current || handScrolledAt.current <= markAt.current) return false
+    if (followRef.current !== 'on' || playingRef.current || handScrolledAt.current <= markAt.current) return false
     const headerBottom = document.querySelector('header')?.getBoundingClientRect().bottom ?? 0
-    const markEl = document.querySelector('.s.on')
-    if (markEl) {
-      const r = markEl.getBoundingClientRect()
-      if (r.bottom > headerBottom && r.top < window.innerHeight) return false // the placemark is still on screen
-    }
     const first = [...document.querySelectorAll<HTMLElement>('main.prose-read [data-sb]')].find((el) => el.getBoundingClientRect().bottom > headerBottom + 8)
     if (!first) return false
     const info = infoFor(chapterRef.current, Number(first.dataset.sb))
@@ -934,6 +936,61 @@ export default function Reader({ id }: { id: string }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hl.block, hl.sent, hl.chapter, chapter])
+
+  // ---------- Reading by scrolling ----------
+  // Steady, slow scrolling over a couple of paragraphs looks like reading: ask once whether the placemark should follow.
+  // Fast flicks (looking for something, checking where the section ends) never ask and never move it.
+  useEffect(() => {
+    if (!chapterData || follow === 'off' || follow === 'asking') return
+    const before: number[] = []
+    chapterData.blocks.reduce((n, t, i) => ((before[i] = n), n + t.length), 0)
+    let run: { block: number; chars: number; t0: number; last: number } | null = null
+    let frame = 0
+    let timer = 0
+    const atTop = () => {
+      const headerBottom = document.querySelector('header')?.getBoundingClientRect().bottom ?? 0
+      const el = [...document.querySelectorAll<HTMLElement>('main.prose-read [data-block]')].find((e) => e.getBoundingClientRect().bottom > headerBottom + 8)
+      if (!el) return null
+      const b = Number(el.dataset.block)
+      const r = el.getBoundingClientRect()
+      const frac = Math.min(1, Math.max(0, (headerBottom - r.top) / Math.max(1, r.height)))
+      return { block: b, chars: (before[b] ?? 0) + frac * (chapterData.blocks[b]?.length ?? 0) }
+    }
+    const onScroll = () => {
+      if (Date.now() - handScrolledAt.current > 1000) return // the app scrolled, not you
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        if (playingRef.current) return void (run = null)
+        if (followRef.current === 'on') {
+          clearTimeout(timer)
+          timer = window.setTimeout(() => {
+            if (placeFromScroll()) {
+              const p = pos.current
+              setHl({ chapter: p.chapter, block: p.block, sent: p.sent, word: -1 })
+              persist()
+            }
+          }, 500)
+          return
+        }
+        const t = atTop()
+        if (!t) return
+        const now = performance.now()
+        if (!run || t.chars < run.last - 40) return void (run = { block: t.block, chars: t.chars, t0: now, last: t.chars })
+        run.last = t.chars
+        const moved = t.chars - run.chars
+        const secs = (now - run.t0) / 1000
+        const pace = moved / Math.max(secs, 0.001) // characters a second; reading is roughly 15–40
+        if (moved > 500 && pace > 55) return void (run = { block: t.block, chars: t.chars, t0: now, last: t.chars }) // skimming
+        if (t.block - run.block >= 2 && moved >= 350 && secs >= 8 && pace <= 55) setFollow('asking')
+      })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      cancelAnimationFrame(frame)
+      clearTimeout(timer)
+    }
+  }, [chapterData, follow, placeFromScroll, persist])
 
   const backToReading = () => {
     userScrolledAt.current = 0
@@ -1381,7 +1438,46 @@ export default function Reader({ id }: { id: string }) {
             </div>
           </div>
         )}
-        {away && !selection && (
+        {follow === 'asking' && !selection && !playing && (
+          <div className="sheet-in mx-auto mb-2 max-w-md rounded-2xl border border-line bg-paper px-4 py-3 shadow-[0_4px_18px_rgb(0_0_0/0.10)]" role="status">
+            <p className="text-sm">
+              <span className="font-semibold">Reading as you scroll?</span> Your placemark can follow the top of the screen, so you come back here next time.
+            </p>
+            <div className="mt-2 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setFollow('on')
+                  handScrolledAt.current = Date.now()
+                  if (placeFromScroll()) {
+                    const p = pos.current
+                    setHl({ chapter: p.chapter, block: p.block, sent: p.sent, word: -1 })
+                    persist()
+                  }
+                }}
+                className="h-9 rounded-full bg-moss px-4 text-sm font-semibold text-moss-ink"
+              >
+                Follow my place
+              </button>
+              <button type="button" onClick={() => setFollow('off')} className="h-9 rounded-full border border-line px-4 text-sm">
+                No, just looking
+              </button>
+            </div>
+          </div>
+        )}
+        {follow === 'on' && !playing && !selection && (
+          <div className="mb-2 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setFollow('off')}
+              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line bg-paper px-3 text-xs text-ink-2 shadow-[0_4px_18px_rgb(0_0_0/0.08)]"
+              aria-label="Stop the placemark following your scrolling"
+            >
+              Placemark follows your scrolling <Icon name="close" size={13} />
+            </button>
+          </div>
+        )}
+        {away && !selection && follow !== 'asking' && follow !== 'on' && (
           <div className="mb-2 flex justify-center">
             <button
               type="button"
