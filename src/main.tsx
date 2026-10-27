@@ -13,8 +13,10 @@ import '@fontsource-variable/atkinson-hyperlegible-next/wght.css'
 import './index.css'
 import App from './App'
 import { initSync } from './lib/sync'
+import { initVoices } from './lib/voices'
 
 initSync()
+initVoices()
 
 // After a new version is deployed, an open tab can ask for code files that no longer exist (when you first
 // import a PDF, say). Reload once to pick up the new version instead of showing "Failed to fetch module".

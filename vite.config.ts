@@ -30,9 +30,36 @@ function ocrAssets(): Plugin {
   return { name: 'qari-ocr-assets', buildStart: copy, configureServer: copy }
 }
 
+/**
+ * Copies Qari's built-in voice engine into public/voices: the Piper phonemizer (espeak-ng), ONNX Runtime and
+ * our worker. Voice models themselves are downloaded on the device when you pick one.
+ */
+function voiceAssets(): Plugin {
+  const files: [string, string][] = [
+    ['src/voices/piper-worker.js', 'piper-worker.js'],
+    ['node_modules/@diffusionstudio/piper-wasm/build/piper_phonemize.js', 'piper_phonemize.js'],
+    ['node_modules/@diffusionstudio/piper-wasm/build/piper_phonemize.wasm', 'piper_phonemize.wasm'],
+    ['node_modules/@diffusionstudio/piper-wasm/build/piper_phonemize.data', 'piper_phonemize.data'],
+    ['node_modules/onnxruntime-web/dist/ort.wasm.min.js', 'ort/ort.wasm.min.js'],
+    ['node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs', 'ort/ort-wasm-simd-threaded.mjs'],
+    ['node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm', 'ort/ort-wasm-simd-threaded.wasm'],
+  ]
+  const copy = () => {
+    for (const [src, to] of files) {
+      const dest = join('public', 'voices', to)
+      if (!existsSync(src)) throw new Error(`Voice asset missing: ${src} (run npm install)`)
+      if (existsSync(dest) && statSync(dest).size === statSync(src).size && statSync(dest).mtimeMs >= statSync(src).mtimeMs) continue
+      mkdirSync(dirname(dest), { recursive: true })
+      copyFileSync(src, dest)
+    }
+  }
+  return { name: 'qari-voice-assets', buildStart: copy, configureServer: copy }
+}
+
 export default defineConfig({
   plugins: [
     ocrAssets(),
+    voiceAssets(),
     react(),
     tailwindcss(),
     VitePWA({
@@ -57,10 +84,16 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,mjs,css,html,svg,png,woff2}'],
         // The OCR engine is big; it's downloaded the first time you scan, then kept for offline use.
-        globIgnores: ['ocr/**'],
+        globIgnores: ['ocr/**', 'voices/**'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
+          {
+            // The voice engine (about 20 MB) is kept after the first time you use a Qari voice.
+            urlPattern: ({ url }) => url.pathname.startsWith('/voices/'),
+            handler: 'CacheFirst',
+            options: { cacheName: 'qari-voice-engine', expiration: { maxEntries: 20 } },
+          },
           {
             urlPattern: ({ url }) => url.pathname.startsWith('/ocr/'),
             handler: 'CacheFirst',

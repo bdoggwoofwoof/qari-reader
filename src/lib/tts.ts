@@ -1,6 +1,7 @@
 import { getSettings } from './settings'
 import type { Lang } from '../types'
-import { baseLang, words } from './lang'
+import { baseLang, words, type Span } from './lang'
+import { engineVoiceFor, isEngineVoice, synth, usable } from './voices'
 
 export function speechSupported() {
   return typeof window !== 'undefined' && 'speechSynthesis' in window
@@ -263,8 +264,179 @@ export class SentenceSpeaker {
   }
 }
 
+// ---------- Qari and Azure voices: real audio files ----------
+
+/** One audio element for the whole app: once it has played after a tap, iPhone lets it keep playing sentence after sentence, even with the screen locked. */
+const audioEl: HTMLAudioElement | null = typeof Audio !== 'undefined' ? new Audio() : null
+if (audioEl) {
+  audioEl.preload = 'auto'
+  ;(audioEl as HTMLAudioElement & { preservesPitch?: boolean }).preservesPitch = true
+}
+// A 0.1 s silent WAV, played straight from a tap to unlock audio on iPhone before the first sentence is ready.
+const SILENCE =
+  'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQQAAAAAAA=='
+let primed = false
+
+/** Call from the Play tap itself (not after an await). */
+export function primeAudio() {
+  if (!audioEl || primed || !audioEl.paused) return
+  primed = true
+  audioEl.src = SILENCE
+  audioEl.play().catch(() => (primed = false))
+}
+
+/** How long each word takes, roughly: phoneme counts from the voice when it gives them, else letters plus pauses at punctuation. */
+function wordWeights(text: string, spans: Span[], groups?: number[]) {
+  const tokens = [...text.matchAll(/\S+/g)].map((m) => ({ start: m.index!, end: m.index! + m[0].length }))
+  if (groups && groups.length === tokens.length) {
+    const per = new Map<number, number>()
+    tokens.forEach((t, k) => {
+      const inside = spans.filter((w) => w.start >= t.start && w.start < t.end)
+      inside.forEach((w) => per.set(w.start, groups[k] / inside.length))
+    })
+    if (spans.every((w) => per.has(w.start))) return spans.map((w) => per.get(w.start)!)
+  }
+  return spans.map((w, k) => {
+    const next = spans[k + 1]?.start ?? text.length
+    const gap = text.slice(w.end, next)
+    return w.end - w.start + 1 + (/[.!?؟…]/.test(gap) ? 6 : /[,;:،؛—–]/.test(gap) ? 3 : 0)
+  })
+}
+
+export interface AudioSpeakOptions extends SpeakOptions {
+  voiceId: string
+}
+
+/** Plays a sentence from a Qari or Azure voice and moves the word highlight along with it. */
+export class AudioSpeaker {
+  private token = 0
+  private frame = 0
+  active = false
+
+  async speak(o: AudioSpeakOptions) {
+    this.stop()
+    const token = ++this.token
+    const el = audioEl
+    if (!el) return o.onError('This browser can’t play audio.')
+    let res
+    try {
+      res = await synth(o.voiceId, o.text)
+    } catch (e) {
+      if (token === this.token) o.onError(e instanceof Error ? e.message : String(e))
+      return
+    }
+    if (token !== this.token) return
+    const spans = words(o.text, o.lang)
+    const weights = wordWeights(o.text, spans, res.groups)
+    const total = weights.reduce((x, y) => x + y, 0) || 1
+    let shown = -1
+    const tick = () => {
+      if (token !== this.token) return
+      const d = el.duration
+      if (d && isFinite(d)) {
+        // A little of the audio at each end is silence.
+        const f = Math.max(0, Math.min(1, (el.currentTime - 0.08) / Math.max(0.1, d - 0.25)))
+        let acc = 0
+        let k = 0
+        while (k < weights.length - 1 && acc + weights[k] <= f * total) acc += weights[k++]
+        if (k !== shown && spans[k]) {
+          shown = k
+          o.onWord(spans[k].start, spans[k].end)
+        }
+      }
+      if (!el.paused) this.frame = requestAnimationFrame(tick)
+    }
+    el.onplaying = () => {
+      if (token !== this.token) return
+      cancelAnimationFrame(this.frame)
+      this.frame = requestAnimationFrame(tick)
+    }
+    el.ontimeupdate = () => token === this.token && tick() // keeps going when the screen is off and frames stop
+    el.onended = () => {
+      if (token !== this.token) return
+      this.active = false
+      o.onEnd()
+    }
+    el.onerror = () => {
+      if (token !== this.token) return
+      this.active = false
+      o.onError('Couldn’t play that sentence.')
+    }
+    el.src = res.url
+    el.playbackRate = o.rate
+    this.active = true
+    try {
+      await el.play()
+    } catch (e) {
+      if (token !== this.token) return
+      this.active = false
+      o.onError((e as Error)?.name === 'NotAllowedError' ? 'Tap play to start audio.' : 'Couldn’t play that sentence.')
+    }
+  }
+
+  /** Gets the next sentences ready while this one plays. */
+  prefetch(voiceId: string, text: string) {
+    synth(voiceId, text).catch(() => {})
+  }
+
+  stop() {
+    this.token++
+    this.active = false
+    cancelAnimationFrame(this.frame)
+    if (audioEl && !audioEl.paused && audioEl.src !== SILENCE) audioEl.pause()
+  }
+}
+
+/** The reader's speaker: device voices through speech synthesis, Qari and Azure voices as audio. */
+export class Speaker {
+  private device = new SentenceSpeaker()
+  private audio = new AudioSpeaker()
+
+  /** With a voiceId, reads with that Qari/Azure voice; if it fails, says why once (onFallback) and reads with the device voice. */
+  speak(o: SpeakOptions & { voiceId?: string; onFallback?: (msg: string) => void }) {
+    this.stop()
+    if (!o.voiceId) return this.device.speak(o)
+    this.audio.speak({
+      ...o,
+      voiceId: o.voiceId,
+      onError: (msg) => {
+        if (/Tap play/.test(msg)) return o.onError(msg)
+        o.onFallback?.(msg)
+        this.device.speak(o)
+      },
+    })
+  }
+  prefetch(voiceId: string, text: string) {
+    this.audio.prefetch(voiceId, text)
+  }
+  /** Audio is playing (device speech has its own checks). */
+  busy() {
+    return this.audio.active
+  }
+  stop() {
+    this.device.stop()
+    this.audio.stop()
+  }
+}
+
+const wordAudio: HTMLAudioElement | null = typeof Audio !== 'undefined' ? new Audio() : null
+
+/** Speaks a single word (for the lookup panel). */
 /** Speaks a single word (for the lookup panel). */
 export function speakWord(text: string, lang: Lang, voiceURI?: string, rate = 0.85) {
+  // A Qari or Azure voice: the same voice you read with.
+  const engine = isEngineVoice(voiceURI) ? (usable(voiceURI) ? voiceURI : undefined) : voiceURI === undefined ? engineVoiceFor(lang) : undefined
+  if (engine && wordAudio) {
+    synth(engine, text).then(
+      (r) => {
+        wordAudio.src = r.url
+        wordAudio.playbackRate = rate
+        wordAudio.play().catch(() => {})
+      },
+      () => speakWord(text, lang, '', rate),
+    )
+    return
+  }
   if (!speechSupported()) return
   speechSynthesis.cancel()
   const u = new SpeechSynthesisUtterance(text)

@@ -32,6 +32,11 @@ A personal replacement for Speechify: read PDFs and EPUBs aloud with word-by-wor
 Gestures: tap a word to read from there (or to mark where Play starts), double-tap it to look it up.
 Keyboard: Space = play/pause, ← / → = previous / next sentence, R = repeat sentence.
 
+- **Voices** – three kinds, chosen per language (library › voices, or Reading settings › Voices):
+  - *Qari voices* (free, built in): Piper neural voices that run on the device in a worker (`src/voices/piper-worker.js`, with ONNX Runtime and the espeak-ng phonemizer copied into `public/voices` at build time). Each voice downloads once from Hugging Face (rhasspy/piper-voices, about 60 MB) and is kept in the browser's cache, so it works offline. They play as audio, so reading keeps going with the screen locked, and the next two sentences are prepared ahead.
+  - *Azure voices* (optional): Microsoft's neural voices through `api/tts.ts`, including Lebanese, Syrian, Jordanian, Egyptian and Iraqi Arabic. Set `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION` and `QARI_ACCESS_CODE` in Vercel, then enter the code in Reading settings. The Free (F0) Speech tier covers 500,000 characters a month and stops there instead of charging. Each sentence's audio is kept on the device, so re-reading costs nothing. If Azure fails (offline, allowance used up), Qari says so once and reads with the device voice.
+  - *Device voices*: the browser's speech voices. On iPhone, web apps only get Apple's basic voices, not Enhanced or Premium ones downloaded in Settings.
+
 ## Run it
 
 ```bash
@@ -84,3 +89,9 @@ This is the central doc for Qari: each working session adds a dated entry here.
 
 ### Oct 27, 2026 (warm-up)
 - **Changed:** the speed reader has *Warm up*. Pick a start speed, a goal and how fast it climbs (Gentle, Steady or Quick). It speeds up only while you're reading, shows a bar toward the goal, and − or + nudges the speed at any time. Stopping it, or closing the speed reader, keeps the speed you reached as your usual speed. The plan syncs between devices. Warm-up is silent; starting it turns Read aloud off.
+
+### Oct 27, 2026 (voices)
+- **Changed:** added Qari voices (Piper, free, on-device, offline) and Azure voices (optional, through `api/tts.ts`). There's a new Voices screen for downloading, choosing and hearing voices per language, reached from the library's voice check and from Reading settings › Voices › Change/Better voice. Speech for these voices plays as audio (one shared audio element, unlocked on the Play tap) with an estimated word highlight: Piper's phoneme counts per word when they line up, otherwise letters plus punctuation pauses. Lookups' "Hear it" and the speed reader's Read aloud use the same voice.
+- **Decisions:** Azure uses the REST endpoint, not the Speech SDK: it's simpler and more reliable on Vercel, and the highlight is estimated rather than exact. Qari voices offered are Piper "medium" quality. Kokoro (more natural English) wasn't added: it's heavy for phones, and Azure covers that need.
+- **Status:** tested in a headless browser with a stand-in Piper model and a mocked Azure (downloading, choosing, playing English with a Qari voice and Arabic with Azure, highlight moving, no device speech used). Not yet heard with real voices; the sandbox can't reach Hugging Face or Azure.
+- **Open:** Newt to try a Qari voice on his iPhone, including with the screen locked. For Azure: create a Speech F0 resource and add `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION` and `QARI_ACCESS_CODE` in Vercel (only `BLOB_READ_WRITE_TOKEN` is set now).

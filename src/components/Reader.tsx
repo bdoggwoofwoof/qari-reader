@@ -11,10 +11,12 @@ import SpeedReader from './SpeedReader'
 import { detectLang, isMostlyArabic, sentences, stripArabicMarks, words, type Span } from '../lib/lang'
 import { rateFor, useSettings } from '../lib/settings'
 import { speechText } from '../lib/speechText'
-import { voiceTier, betterVoiceHint, CHARS_PER_SEC, getVoices, SAMPLES, onlyBasic, onVoicesChanged, pickVoice, SentenceSpeaker, speechSupported, speakWord, voicesFor } from '../lib/tts'
+import { CHARS_PER_SEC, getVoices, SAMPLES, onlyBasic, onVoicesChanged, pickVoice, primeAudio, Speaker, speechSupported, speakWord } from '../lib/tts'
 import { ARABIC_FONTS, LANG_NAMES, READ_FONTS, RTL_LANGS, type ArabicFont, type ReadFont, type DocContent, type DocMeta, type Highlight, type Lang } from '../types'
 import LookupSheet, { type Picked } from './LookupSheet'
 import { claudeStatus } from '../lib/translate'
+import { engineVoiceFor, isEngineVoice, usable, useVoiceState } from '../lib/voices'
+import VoicePicker, { voiceLabel } from './VoicePicker'
 import { countNew, isKnown, isLearning, isTrackable, setKnown, useVocab, vocabKey } from '../lib/vocab'
 import { Icon, IconButton, Sheet } from './ui'
 
@@ -237,6 +239,9 @@ export default function Reader({ id }: { id: string }) {
     n: number
   } | null>(null)
   const rsvpLookupChapter = useRef(0)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerLang, setPickerLang] = useState<Lang>('en')
+  useVoiceState() // re-render when a voice finishes downloading
   const [sleep, setSleepState] = useState<Sleep>({ kind: 'off' })
   const [now, setNow] = useState(Date.now())
   const [away, setAway] = useState(false)
@@ -246,7 +251,7 @@ export default function Reader({ id }: { id: string }) {
   const [newTo, setNewTo] = useState('')
   const [settings, updateSettings] = useSettings()
 
-  const speaker = useRef(new SentenceSpeaker())
+  const speaker = useRef(new Speaker())
   const pos = useRef<Pos>({ chapter: 0, block: 0, sent: 0 })
   const lastWord = useRef<number | null>(null)
   const playingRef = useRef(false)
@@ -700,14 +705,33 @@ export default function Reader({ id }: { id: string }) {
         return
       }
       const voice = pickVoice(info.lang, st.voices[info.lang])
-      if (!voice && !warnedLangs.current.has(info.lang)) {
+      const voiceId = engineVoiceFor(info.lang)
+      if (!voice && !voiceId && !warnedLangs.current.has(info.lang)) {
         warnedLangs.current.add(info.lang)
         setNotice(`This device has no ${LANG_NAMES[info.lang] || info.lang} voice installed, so it may be read in the wrong accent or skipped. See Settings for how to add one.`)
+      }
+      if (voiceId) {
+        // Get the next two sentences' audio ready while this one plays.
+        let p: Pos | null = { chapter: c, block: b, sent: s }
+        for (let k = 0; k < 2 && p; k++) {
+          p = nextPos(p.chapter, p.block, p.sent)
+          const ni = p && infoFor(p.chapter, p.block)
+          const ns = p && ni?.sents[p.sent]
+          if (!p || !ni || !ns || ni.lang !== info.lang) break
+          const t = speechText(doc.chapters[p.chapter].blocks[p.block].slice(ns.start, ns.end), st).text
+          if (/[\p{L}\p{N}]/u.test(t)) speaker.current.prefetch(voiceId, t)
+        }
       }
       speaker.current.speak({
         text: spoken.text,
         lang: info.lang,
         voice,
+        voiceId,
+        onFallback: (msg) => {
+          if (warnedLangs.current.has('fallback:' + info.lang)) return
+          warnedLangs.current.add('fallback:' + info.lang)
+          setNotice(`${msg} Reading with this device’s voice for now.`)
+        },
         rate: rateFor(st, info.lang),
         onWord: (ws) => {
           const at = start + (spoken.map[ws] ?? ws)
@@ -724,7 +748,7 @@ export default function Reader({ id }: { id: string }) {
         },
       })
     },
-    [infoFor, persist],
+    [infoFor, persist, nextPos],
   )
 
   const advance = useCallback(
@@ -768,6 +792,7 @@ export default function Reader({ id }: { id: string }) {
   }
 
   const play = useCallback(() => {
+    primeAudio() // must happen in the tap itself, or iPhone won't play the voice's audio
     if (!speechSupported()) {
       setNotice('This browser can’t speak text aloud. Try Chrome, Edge or Safari.')
       return
@@ -794,7 +819,7 @@ export default function Reader({ id }: { id: string }) {
       keepAwake()
       if (speechSynthesis.paused) speechSynthesis.resume()
       window.setTimeout(() => {
-        if (playingRef.current && !speechSynthesis.speaking && !speechSynthesis.pending) {
+        if (playingRef.current && !speaker.current.busy() && !speechSynthesis.speaking && !speechSynthesis.pending) {
           const p = pos.current
           speakAt(p.chapter, p.block, p.sent, lastWord.current ?? undefined)
         }
@@ -1238,10 +1263,7 @@ export default function Reader({ id }: { id: string }) {
     )
   if (!meta || !content || !chapterData) return <div className="p-10 text-center text-ink-3">Opening…</div>
 
-  const voicesNow = (lang: Lang) => {
-    void voicesVersion
-    return voicesFor(lang, { all: settings.showAllVoices })
-  }
+  void voicesVersion // re-render when the device's voices load
   const isLast = chapter >= content.chapters.length - 1
 
   // Progress and time left in this section, at the current speed.
@@ -1718,71 +1740,37 @@ export default function Reader({ id }: { id: string }) {
         <section className="mb-6">
           <h3 className="mb-2 font-semibold">Voices</h3>
           {chapterLangs.map((lang) => {
-            const list = voicesNow(lang)
-            const chosen = pickVoice(lang, settings.voices[lang])
+            const id = settings.voices[lang]
+            const basic = !(isEngineVoice(id) && usable(id)) && (onlyBasic(lang) || !pickVoice(lang, id))
             return (
-              <div key={lang} className="mb-3">
-                <label className="mb-1 block text-sm text-ink-2" htmlFor={'v-' + lang}>
-                  {LANG_NAMES[lang] || lang}
-                </label>
-                {list.length ? (
-                  <div className="flex gap-2">
-                    <select
-                      id={'v-' + lang}
-                      value={chosen?.voiceURI}
-                      onChange={(e) =>
-                        updateSettings({
-                          voices: {
-                            ...settings.voices,
-                            [lang]: e.target.value,
-                          },
-                        })
-                      }
-                      className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-paper-2 px-3"
-                    >
-                      {list.map((v) => (
-                        <option key={v.voiceURI} value={v.voiceURI}>
-                          {v.name} ({v.lang}){v.localService ? '' : ' · online'}
-                          {voiceTier(v) < 2 ? ' · basic' : ''}
-                        </option>
-                      ))}
-                    </select>
-                    <IconButton
-                      icon="speaker"
-                      label={`Hear the ${LANG_NAMES[lang] || lang} voice`}
-                      onClick={() => {
-                        pause()
-                        speakWord(SAMPLES[lang] || SAMPLES.en, lang, chosen?.voiceURI, rateFor(settings, lang))
-                      }}
-                      className="border border-line"
-                    />
-                  </div>
-                ) : (
-                  <p className="rounded-xl bg-paper-2 px-3 py-2 text-sm text-ink-2">
-                    No {LANG_NAMES[lang] || lang} voice on this device. On iPhone: Settings › Accessibility › Spoken Content › Voices. On Android: Settings › Text-to-speech › Install voice data. On
-                    Windows: Settings › Time &amp; language › Speech. Then reopen this page.
-                  </p>
-                )}
+              <div key={lang} className="mb-3 flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-ink-2">{LANG_NAMES[lang] || lang}</div>
+                  <div className="truncate font-semibold">{voiceLabel(lang, id)}</div>
+                  {basic && <div className="text-xs text-ink-3">Get a Qari voice for natural reading that works offline.</div>}
+                </div>
+                <IconButton
+                  icon="speaker"
+                  label={`Hear the ${LANG_NAMES[lang] || lang} voice`}
+                  onClick={() => {
+                    pause()
+                    speakWord(SAMPLES[lang] || SAMPLES.en, lang, id, rateFor(settings, lang))
+                  }}
+                  className="border border-line"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPickerLang(lang)
+                    setPickerOpen(true)
+                  }}
+                  className={`h-10 shrink-0 rounded-full px-4 text-sm ${basic ? 'bg-moss font-semibold text-moss-ink' : 'border border-line'}`}
+                >
+                  {basic ? 'Better voice' : 'Change'}
+                </button>
               </div>
             )
           })}
-          {chapterLangs.some((l) => onlyBasic(l)) && !settings.showAllVoices && (
-            <p className="mb-3 rounded-xl bg-paper-2 px-3 py-2 text-sm text-ink-2">
-              This device only has a basic{' '}
-              {chapterLangs
-                .filter((l) => onlyBasic(l))
-                .map((l) => LANG_NAMES[l] || l)
-                .join(' and ')}{' '}
-              voice. {betterVoiceHint()}
-            </p>
-          )}
-          <p className="text-xs text-ink-3">
-            {settings.showAllVoices ? 'Showing every voice on this device. ' : 'Only the natural-sounding voices are listed. '}
-            <button type="button" className="underline underline-offset-2" onClick={() => updateSettings({ showAllVoices: !settings.showAllVoices })}>
-              {settings.showAllVoices ? 'Show only the best' : 'Show all voices'}
-            </button>
-            {settings.showAllVoices ? '' : '. Voices marked “online” need an internet connection.'}
-          </p>
         </section>
 
         <Toggle
@@ -2083,6 +2071,11 @@ export default function Reader({ id }: { id: string }) {
         }}
       />
 
+      <VoicePicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        langs={[pickerLang, ...chapterLangs.filter((l) => l !== pickerLang), ...settings.learning.filter((l) => l !== pickerLang && !chapterLangs.includes(l))]}
+      />
       {rsvp && content && (
         <SpeedReader
           content={content}
