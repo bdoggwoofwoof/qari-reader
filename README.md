@@ -57,3 +57,13 @@ Push to a GitHub repo, import it in Vercel, framework preset **Vite**. For sync,
 ## Roadmap ideas
 
 2. Premium voices (pay-per-use API) as an option per language.
+
+## Status log
+
+This is the central doc for Qari: each working session adds a dated entry here.
+
+### Oct 27, 2026
+- **Changed:** added speed reading (one word at a time in a fixed spot with a red focus letter, 100–1000 words a minute, longer pauses at punctuation; closing it puts your place on the last word shown). Added dyslexia-friendly fonts (OpenDyslexic, Lexend, Atkinson Hyperlegible) and *Bold word starts* (bionic reading) in reading settings. These work in every book, whether EPUB, PDF, Word, web or scan. The tour gained a Speed read step.
+- **Decisions:** speed reading runs silently at its own speed rather than following the voice. Bionic reading and the dyslexia font's size and spacing apply to left-to-right text only; Arabic keeps its own font, because letter spacing breaks Arabic letter joining. The new settings sync between devices.
+- **Status:** live at qari-reader.vercel.app; tested on a phone-sized screen with a PDF and an EPUB.
+- **Open:** iPhone web apps can only use Apple's pre-installed (basic) voices, so getting good voices on the phone needs voices built into Qari (Piper/Kokoro, free) or Azure (free tier, then paid). Newt hasn't chosen yet. Earlier this week: only natural-sounding voices are listed, there's a light/dark switch, a guided tour, and light and dark icons.
