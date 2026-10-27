@@ -74,3 +74,6 @@ This is the central doc for Qari: each working session adds a dated entry here.
 
 ### Oct 27, 2026 (tap change)
 - **Changed:** tapping a word now sets where reading starts. If the voice is reading, it carries on from that word; if paused, the word is marked and Play starts there. Double-tapping a word looks it up, or opens its highlight. The tour, tips and README now say so.
+
+### Oct 27, 2026 (placemark)
+- **Changed:** each book has one placemark, shared by listening, the speed reader and reading by scrolling. It saves the exact word: where the voice paused, the word you tapped, or the last word the speed reader showed (even if you leave the app without closing it). If you read by scrolling and leave the book with the placemark off screen, the placemark moves to the top of what you were looking at. On reopening, the placemark sentence is tinted, even when it's the first sentence of a paragraph (before, those showed no mark). It syncs between devices like before.

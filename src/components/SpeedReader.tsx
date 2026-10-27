@@ -78,6 +78,7 @@ export default function SpeedReader({
   onVoicePause,
   onLookup,
   seek,
+  onProgress,
 }: {
   content: DocContent
   start: { chapter: number; block: number; offset: number }
@@ -90,6 +91,7 @@ export default function SpeedReader({
   onVoicePause: () => void
   onLookup: (w: { chapter: number; block: number; start: number; end: number }) => void
   seek: { chapter: number; block: number; start: number; n: number } | null // "read from here" in a lookup
+  onProgress: (at: { chapter: number; block: number; start: number }) => void // keeps the book's placemark on the word shown
 }) {
   const [settings, updateSettings] = useSettings()
   const wpm = settings.speedWpm || 300
@@ -162,6 +164,13 @@ export default function SpeedReader({
   const atEnd = items.length > 0 && i >= items.length - 1 && loadedTo >= content.chapters.length - 1
 
   const isPlaying = voiceOn ? voicePlaying : playing
+
+  // One placemark for the book: the reader's place follows the word on screen.
+  const progressRef = useRef(onProgress)
+  progressRef.current = onProgress
+  useEffect(() => {
+    if (cur && !voiceOn) progressRef.current({ chapter: cur.c, block: cur.b, start: cur.start })
+  }, [cur, voiceOn])
 
   // With the voice on, show whatever word it's saying.
   useEffect(() => {

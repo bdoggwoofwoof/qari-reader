@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { go } from '../App'
 import { getDoc, getFile, listHighlights, onLocalChange, savePosition, saveHighlight, updateDocMeta } from '../lib/db'
 import { quoteLine } from '../lib/quotes'
@@ -263,6 +263,10 @@ export default function Reader({ id }: { id: string }) {
   const userScrolledAt = useRef(0)
   const saveTimer = useRef<number | null>(null)
   const tapTimer = useRef<number | null>(null)
+  const markAt = useRef(0) // when the placemark last moved
+  const handScrolledAt = useRef(0) // when you last scrolled by hand
+  const chapterRef = useRef(0)
+  chapterRef.current = chapter
   const lastTap = useRef<{ b: number; s: number; t: number } | null>(null)
   const tappedWord = useRef<{ b: number; start: number; end: number } | null>(null)
   const wakeLock = useRef<WakeSentinel | null>(null)
@@ -298,7 +302,11 @@ export default function Reader({ id }: { id: string }) {
           : 0
       setChapter(ch)
       pos.current = { chapter: ch, block: p.block, sent: si }
-      setHl({ chapter: ch, block: p.block, sent: si > 0 ? si : -1, word: -1 })
+      // Saved mid-sentence (a tapped word, or where the speed reader stopped): start again from that word.
+      lastWord.current = sents[si] && p.offset > sents[si].start ? p.offset : null
+      // Show the placemark, unless the book has never been read.
+      const fresh = ch === 0 && p.block === 0 && p.offset === 0 && !(d.meta.progress ?? 0)
+      setHl({ chapter: ch, block: p.block, sent: fresh ? -1 : si, word: -1 })
       updateDocMeta(id, { openedAt: Date.now() }, 'opened')
       requestAnimationFrame(() => {
         const el = (si > 0 && document.querySelector(`[data-sb="${p.block}"][data-si="${si}"]`)) || document.querySelector(`[data-block="${p.block}"]`)
@@ -546,20 +554,50 @@ export default function Reader({ id }: { id: string }) {
     if (!m || !doc) return
     lastOwnSave.current = Date.now()
     const { chapter: c, block: b, sent: s } = pos.current
-    const offset = infoFor(c, b)?.sents[s]?.start ?? 0
+    // The exact word when there is one (a tap, the speed reader, a pause mid-sentence), else the sentence.
+    const sent = infoFor(c, b)?.sents[s]
+    const lw = lastWord.current
+    const offset = sent && lw !== null && lw >= sent.start && lw < sent.end ? lw : (sent?.start ?? 0)
     const inChapter = doc.chapters[c].blocks.slice(0, b).reduce((n, t) => n + t.length, 0) + offset
     const progress = m.charCount ? Math.min(1, ((m.charsBefore[c] ?? 0) + inChapter) / m.charCount) : 0
     savePosition(m.id, { chapter: c, block: b, offset }, progress)
   }, [infoFor])
 
   const persist = useCallback(() => {
+    markAt.current = Date.now()
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(writePosition, 800)
   }, [writePosition])
 
+  /**
+   * Reading by scrolling (no voice): if you scrolled away from the placemark and leave the book there,
+   * the placemark moves to the first sentence at the top of the screen, so you come back to where you were looking.
+   */
+  const placeFromScroll = useCallback(() => {
+    if (playingRef.current || handScrolledAt.current <= markAt.current) return false
+    const headerBottom = document.querySelector('header')?.getBoundingClientRect().bottom ?? 0
+    const markEl = document.querySelector('.s.on')
+    if (markEl) {
+      const r = markEl.getBoundingClientRect()
+      if (r.bottom > headerBottom && r.top < window.innerHeight) return false // the placemark is still on screen
+    }
+    const first = [...document.querySelectorAll<HTMLElement>('main.prose-read [data-sb]')].find((el) => el.getBoundingClientRect().bottom > headerBottom + 8)
+    if (!first) return false
+    const info = infoFor(chapterRef.current, Number(first.dataset.sb))
+    const si = Number(first.dataset.si)
+    if (!info?.sents[si]) return false
+    pos.current = { chapter: chapterRef.current, block: Number(first.dataset.sb), sent: si }
+    lastWord.current = null
+    markAt.current = Date.now()
+    return true
+  }, [infoFor])
+
+  // Leaving the book (back to the library) right after scrolling: place the mark before the page goes away.
+  useLayoutEffect(() => () => void (placeFromScroll() && writePosition()), [placeFromScroll, writePosition])
+
   // Closing the tab or switching apps inside the save delay: write the place now.
   useEffect(() => {
-    const flush = () => saveTimer.current && writePosition()
+    const flush = () => (placeFromScroll() || saveTimer.current) && writePosition()
     const onHide = () => document.visibilityState === 'hidden' && flush()
     window.addEventListener('pagehide', flush)
     document.addEventListener('visibilitychange', onHide)
@@ -568,7 +606,7 @@ export default function Reader({ id }: { id: string }) {
       document.removeEventListener('visibilitychange', onHide)
       flush()
     }
-  }, [writePosition])
+  }, [writePosition, placeFromScroll])
 
   // ---------- Playback ----------
   /** Keeps the screen on while reading (iPhone stops speech when it locks). The browser drops the lock when the app is hidden. */
@@ -885,7 +923,7 @@ export default function Reader({ id }: { id: string }) {
       setAway(r.bottom < 70 || r.top > window.innerHeight - 170)
     }
     check()
-    const mark = () => (userScrolledAt.current = Date.now())
+    const mark = () => (userScrolledAt.current = handScrolledAt.current = Date.now())
     window.addEventListener('scroll', check, { passive: true })
     window.addEventListener('wheel', mark, { passive: true })
     window.addEventListener('touchmove', mark, { passive: true })
@@ -1960,6 +1998,13 @@ export default function Reader({ id }: { id: string }) {
           onVoicePause={pause}
           onLookup={lookupFromSpeed}
           seek={rsvpSeek}
+          onProgress={(at) => {
+            const info = infoFor(at.chapter, at.block)
+            if (!info) return
+            pos.current = { chapter: at.chapter, block: at.block, sent: Math.max(0, info.sents.findIndex((x) => at.start >= x.start && at.start < x.end)) }
+            lastWord.current = at.start
+            persist()
+          }}
           onClose={(at) => {
             setRsvp(null)
             setRsvpSeek(null)
