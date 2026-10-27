@@ -81,6 +81,7 @@ export interface Settings {
   readFont?: ReadFont
   bionic?: boolean // bold the start of each word
   speedWpm?: number // speed reader, words per minute
+  speedVoice?: boolean // speed reader: the voice reads along and sets the pace
   skipCitations: boolean
   pronunciations: Pronunciation[]
   voiceCheckDone: boolean

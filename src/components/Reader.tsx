@@ -40,7 +40,10 @@ interface Mark {
   note: boolean
 }
 
-type WakeSentinel = { release: () => Promise<void>; addEventListener: (t: 'release', f: () => void) => void }
+type WakeSentinel = {
+  release: () => Promise<void>
+  addEventListener: (t: 'release', f: () => void) => void
+}
 
 interface Pos {
   chapter: number
@@ -106,7 +109,15 @@ const Block = memo(function Block({
         const gap = show(text.slice(c, w.start))
         // Colour the space between two words of the same highlight, so it reads as one stroke.
         const inMark = marks?.some((k) => c > k.start && w.start < k.end)
-        inner.push(inMark ? <span key={'g' + c} className="hl">{gap}</span> : gap)
+        inner.push(
+          inMark ? (
+            <span key={'g' + c} className="hl">
+              {gap}
+            </span>
+          ) : (
+            gap
+          ),
+        )
       }
       const m = marks?.find((k) => w.start < k.end && w.end > k.start)
       const last = m && !info.words.some((x) => x.start > w.start && x.start < m.end)
@@ -178,13 +189,32 @@ export default function Reader({ id }: { id: string }) {
   const [content, setContent] = useState<DocContent | null>(null)
   const [missing, setMissing] = useState(false)
   const [chapter, setChapter] = useState(0)
-  const [hl, setHl] = useState<Spot>({ chapter: 0, block: 0, sent: -1, word: -1 })
+  const [hl, setHl] = useState<Spot>({
+    chapter: 0,
+    block: 0,
+    sent: -1,
+    word: -1,
+  })
   const [highlights, setHighlights] = useState<Highlight[]>([])
   const [openHl, setOpenHl] = useState<Highlight | null>(null)
-  const [selection, setSelection] = useState<{ startBlock: number; start: number; endBlock: number; end: number; text: string } | null>(null)
+  const [selection, setSelection] = useState<{
+    startBlock: number
+    start: number
+    endBlock: number
+    end: number
+    text: string
+  } | null>(null)
   const [panelTab, setPanelTab] = useState<PanelTab>('contents')
-  const [flash, setFlash] = useState<{ chapter: number; block: number; start: number; end: number } | null>(null)
-  const [viewPage, setViewPage] = useState<{ page: number; label?: string } | null>(null)
+  const [flash, setFlash] = useState<{
+    chapter: number
+    block: number
+    start: number
+    end: number
+  } | null>(null)
+  const [viewPage, setViewPage] = useState<{
+    page: number
+    label?: string
+  } | null>(null)
   const [hasOriginal, setHasOriginal] = useState(false)
   const [claudeAvail, setClaudeAvail] = useState(false)
   // The original PDF is here, or can come from sync when a page is opened.
@@ -195,7 +225,18 @@ export default function Reader({ id }: { id: string }) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [sleepOpen, setSleepOpen] = useState(false)
   const [speedOpen, setSpeedOpen] = useState(false)
-  const [rsvp, setRsvp] = useState<{ chapter: number; block: number; offset: number } | null>(null)
+  const [rsvp, setRsvp] = useState<{
+    chapter: number
+    block: number
+    offset: number
+  } | null>(null)
+  const [rsvpSeek, setRsvpSeek] = useState<{
+    chapter: number
+    block: number
+    start: number
+    n: number
+  } | null>(null)
+  const rsvpLookupChapter = useRef(0)
   const [sleep, setSleepState] = useState<Sleep>({ kind: 'off' })
   const [now, setNow] = useState(Date.now())
   const [away, setAway] = useState(false)
@@ -248,7 +289,13 @@ export default function Reader({ id }: { id: string }) {
       metaRef.current = d.meta
       contentRef.current = d.content
       const sents = infoFor(ch, p.block)?.sents || []
-      const si = p.offset > 0 ? Math.max(0, sents.findIndex((s) => p.offset >= s.start && p.offset < s.end)) : 0
+      const si =
+        p.offset > 0
+          ? Math.max(
+              0,
+              sents.findIndex((s) => p.offset >= s.start && p.offset < s.end),
+            )
+          : 0
       setChapter(ch)
       pos.current = { chapter: ch, block: p.block, sent: si }
       setHl({ chapter: ch, block: p.block, sent: si > 0 ? si : -1, word: -1 })
@@ -379,7 +426,12 @@ export default function Reader({ id }: { id: string }) {
       if (h.chapter !== chapter) continue
       for (let b = h.startBlock; b <= h.endBlock; b++) {
         const len = chapterData?.blocks[b]?.length ?? 0
-        ;(out[b] ||= []).push({ id: h.id, start: b === h.startBlock ? h.start : 0, end: b === h.endBlock ? h.end : len, note: !!h.note.trim() })
+        ;(out[b] ||= []).push({
+          id: h.id,
+          start: b === h.startBlock ? h.start : 0,
+          end: b === h.endBlock ? h.end : len,
+          note: !!h.note.trim(),
+        })
       }
     }
     return out
@@ -403,9 +455,7 @@ export default function Reader({ id }: { id: string }) {
       const end = Number(z.dataset.e)
       const blocks = contentRef.current?.chapters[chapter]?.blocks || []
       const text =
-        startBlock === endBlock
-          ? blocks[startBlock].slice(start, end)
-          : [blocks[startBlock].slice(start), ...blocks.slice(startBlock + 1, endBlock), blocks[endBlock].slice(0, end)].join('\n\n')
+        startBlock === endBlock ? blocks[startBlock].slice(start, end) : [blocks[startBlock].slice(start), ...blocks.slice(startBlock + 1, endBlock), blocks[endBlock].slice(0, end)].join('\n\n')
       setSelection({ startBlock, start, endBlock, end, text })
     }
     document.addEventListener('selectionchange', onSel)
@@ -449,14 +499,25 @@ export default function Reader({ id }: { id: string }) {
     const s2 = info.sents.find((s) => selection.end > s.start && selection.end <= s.end) || s1
     window.getSelection()?.removeAllRanges()
     setSelection(null)
-    setPicked({ word: selection.text.trim(), lang: info.lang, sentence: text.slice(s1.start, s2.end).trim(), block: b, start: selection.start })
+    setPicked({
+      word: selection.text.trim(),
+      lang: info.lang,
+      sentence: text.slice(s1.start, s2.end).trim(),
+      block: b,
+      start: selection.start,
+    })
   }
 
   const copySelection = async () => {
     if (!selection || !meta) return
     const p = chapterData?.pages?.[selection.startBlock]
     try {
-      await navigator.clipboard.writeText(quoteLine(meta, { text: selection.text, page: p?.split('–')[0] } as Highlight))
+      await navigator.clipboard.writeText(
+        quoteLine(meta, {
+          text: selection.text,
+          page: p?.split('–')[0],
+        } as Highlight),
+      )
       setNotice('Quote copied with its citation.')
     } catch {
       /* clipboard blocked */
@@ -513,7 +574,11 @@ export default function Reader({ id }: { id: string }) {
   /** Keeps the screen on while reading (iPhone stops speech when it locks). The browser drops the lock when the app is hidden. */
   const keepAwake = () => {
     if (!('wakeLock' in navigator) || wakeLock.current) return
-    ;(navigator as unknown as { wakeLock: { request: (t: string) => Promise<WakeSentinel> } }).wakeLock
+    ;(
+      navigator as unknown as {
+        wakeLock: { request: (t: string) => Promise<WakeSentinel> }
+      }
+    ).wakeLock
       .request('screen')
       .then((l) => {
         if (!playingRef.current) return void l.release().catch(() => {})
@@ -746,7 +811,13 @@ export default function Reader({ id }: { id: string }) {
     (b: number, at?: number) => {
       const info = infoFor(chapter, b)
       if (!info?.sents.length) return
-      const si = at === undefined ? 0 : Math.max(0, info.sents.findIndex((s) => at >= s.start && at < s.end))
+      const si =
+        at === undefined
+          ? 0
+          : Math.max(
+              0,
+              info.sents.findIndex((s) => at >= s.start && at < s.end),
+            )
       pos.current = { chapter, block: b, sent: si }
       lastWord.current = at ?? null
       repeated.current = false
@@ -790,7 +861,10 @@ export default function Reader({ id }: { id: string }) {
     const el = activeEl()
     if (!el) return
     const r = el.getBoundingClientRect()
-    window.scrollTo({ top: window.scrollY + r.top - window.innerHeight * 0.33, behavior: smooth ? 'smooth' : 'auto' })
+    window.scrollTo({
+      top: window.scrollY + r.top - window.innerHeight * 0.33,
+      behavior: smooth ? 'smooth' : 'auto',
+    })
   }
 
   useEffect(() => {
@@ -881,7 +955,10 @@ export default function Reader({ id }: { id: string }) {
 
   useEffect(() => {
     if (!('mediaSession' in navigator) || !meta) return
-    navigator.mediaSession.metadata = new MediaMetadata({ title: meta.title, artist: meta.author || 'Qari' })
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: meta.title,
+      artist: meta.author || 'Qari',
+    })
     navigator.mediaSession.setActionHandler('play', play)
     navigator.mediaSession.setActionHandler('pause', pause)
     navigator.mediaSession.setActionHandler('nexttrack', () => step(1))
@@ -931,14 +1008,65 @@ export default function Reader({ id }: { id: string }) {
       }
       const text = content.chapters[chapter].blocks[b]
       const sent = info.sents.find((s) => start >= s.start && start < s.end) || { start: 0, end: text.length }
-      setPicked({ word: text.slice(start, Number(el.dataset.e)), lang: info.lang, sentence: text.slice(sent.start, sent.end).trim(), block: b, start })
+      setPicked({
+        word: text.slice(start, Number(el.dataset.e)),
+        lang: info.lang,
+        sentence: text.slice(sent.start, sent.end).trim(),
+        block: b,
+        start,
+      })
     }, 300)
   }
 
   const readFromHere = (p: Picked) => {
     resumeAfterLookup.current = false
     setPicked(null)
+    if (rsvp) {
+      // In the speed reader: move it to that word.
+      setRsvpSeek((old) => ({
+        chapter: rsvpLookupChapter.current,
+        block: p.block,
+        start: p.start,
+        n: (old?.n ?? 0) + 1,
+      }))
+      return
+    }
     jumpTo(p.block, p.start)
+  }
+
+  /** Starts the voice at a word anywhere in the book (the speed reader's "Read aloud"). */
+  const playFrom = (c: number, b: number, offset: number) => {
+    const info = infoFor(c, b)
+    if (!info?.sents.length) return
+    pos.current = {
+      chapter: c,
+      block: b,
+      sent: Math.max(
+        0,
+        info.sents.findIndex((s) => offset >= s.start && offset < s.end),
+      ),
+    }
+    lastWord.current = offset
+    repeated.current = false
+    play()
+  }
+
+  /** A word tapped in the speed reader, which may be in another section than the page behind it. */
+  const lookupFromSpeed = (w: { chapter: number; block: number; start: number; end: number }) => {
+    pause()
+    resumeAfterLookup.current = false
+    const info = infoFor(w.chapter, w.block)
+    const text = contentRef.current?.chapters[w.chapter]?.blocks[w.block]
+    if (!info || text === undefined) return
+    const sent = info.sents.find((s) => w.start >= s.start && w.start < s.end) || { start: 0, end: text.length }
+    rsvpLookupChapter.current = w.chapter
+    setPicked({
+      word: text.slice(w.start, w.end),
+      lang: info.lang,
+      sentence: text.slice(sent.start, sent.end).trim(),
+      block: w.block,
+      start: w.start,
+    })
   }
 
   const goChapter = (c: number) => {
@@ -966,9 +1094,7 @@ export default function Reader({ id }: { id: string }) {
     setFlash({ chapter: c, block: b, start, end })
     userScrolledAt.current = Date.now() // don't let follow-along fight the jump
     persist()
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => document.querySelector(`[data-b="${b}"][data-s="${start}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })),
-    )
+    requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector(`[data-b="${b}"][data-s="${start}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })))
     setTimeout(() => setFlash(null), 2400)
   }
 
@@ -1066,9 +1192,7 @@ export default function Reader({ id }: { id: string }) {
           <span className="relative">
             <IconButton icon="list" label={highlights.length ? `Contents and ${highlights.length} notes` : 'Contents and notes'} onClick={() => openPanel(highlights.length ? 'notes' : 'contents')} />
             {highlights.length > 0 && (
-              <span className="pointer-events-none absolute top-1.5 right-1 min-w-4 rounded-full bg-mark px-1 text-center text-[0.65rem] leading-4 font-semibold text-ink">
-                {highlights.length}
-              </span>
+              <span className="pointer-events-none absolute top-1.5 right-1 min-w-4 rounded-full bg-mark px-1 text-center text-[0.65rem] leading-4 font-semibold text-ink">{highlights.length}</span>
             )}
           </span>
           <IconButton icon="words" label="Saved words" onClick={() => go('words')} className="max-[359px]:hidden" />
@@ -1087,7 +1211,10 @@ export default function Reader({ id }: { id: string }) {
 
       {elsewhere && (
         <div className="mx-auto mt-3 flex max-w-[38rem] items-center gap-3 rounded-xl border border-moss/50 bg-wash px-4 py-3 text-sm" role="status">
-          <span className="flex-1">You read further on another device{content.chapters[elsewhere.chapter] ? `, in “${content.chapters[elsewhere.chapter].title}”` : ''}.</span>
+          <span className="flex-1">
+            You read further on another device
+            {content.chapters[elsewhere.chapter] ? `, in “${content.chapters[elsewhere.chapter].title}”` : ''}.
+          </span>
           <button type="button" className="shrink-0 font-semibold text-moss underline" onClick={goElsewhere}>
             Go there
           </button>
@@ -1141,8 +1268,8 @@ export default function Reader({ id }: { id: string }) {
         {sectionNewCount > 0 && (
           <div className="mt-10 rounded-2xl border border-line bg-paper-2 px-4 py-3 font-ui text-sm">
             <p className="text-ink-2">
-              <span className="nw-chip rounded px-1 font-semibold text-ink">{sectionNewCount}</span> new {sectionNewCount === 1 ? 'word' : 'words'} in this section. Done with it? Mark
-              the ones you didn’t look up as known, so next time only the words you still need stand out.
+              <span className="nw-chip rounded px-1 font-semibold text-ink">{sectionNewCount}</span> new {sectionNewCount === 1 ? 'word' : 'words'} in this section. Done with it? Mark the ones you
+              didn’t look up as known, so next time only the words you still need stand out.
             </p>
             <button type="button" onClick={markSectionKnown} className="mt-2 h-9 rounded-full bg-moss px-4 font-semibold text-moss-ink">
               Mark {sectionNewCount} as known
@@ -1187,8 +1314,7 @@ export default function Reader({ id }: { id: string }) {
                   onClick={lookUpSelection}
                   className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-semibold hover:bg-paper-2"
                 >
-                  <Icon name={selection.text.trim().split(/\s+/).length > 6 ? 'translate' : 'search'} size={16} />{' '}
-                  {selection.text.trim().split(/\s+/).length > 6 ? 'Translate' : 'Look up'}
+                  <Icon name={selection.text.trim().split(/\s+/).length > 6 ? 'translate' : 'search'} size={16} /> {selection.text.trim().split(/\s+/).length > 6 ? 'Translate' : 'Look up'}
                 </button>
               )}
               <button
@@ -1218,30 +1344,35 @@ export default function Reader({ id }: { id: string }) {
         <div className="mx-auto max-w-md rounded-[28px] border border-line bg-paper/95 px-2 pt-2 pb-1.5 shadow-[0_6px_30px_rgb(0_0_0/0.10)] backdrop-blur">
           <div className="flex items-center justify-between gap-3 px-3 text-xs text-ink-3">
             <span className="min-w-0 truncate tabular-nums" aria-live="off">
-              {fmtMinutes(secsLeft)} left<span className="max-[420px]:hidden"> in section</span>
+              {fmtMinutes(secsLeft)} left
+              <span className="max-[420px]:hidden"> in section</span>
             </span>
             <span className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onClick={() => {
-                pause()
-                const p = pos.current
-                const sent = infoFor(p.chapter, p.block)?.sents[Math.max(0, p.sent)]
-                setRsvp({ chapter: p.chapter, block: p.block, offset: lastWord.current ?? sent?.start ?? 0 })
-              }}
-              className="inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 hover:bg-paper-2"
-              data-tour="speedread"
-            >
-              <Icon name="bolt" size={14} /> Speed read
-            </button>
-            <button
-              type="button"
-              onClick={() => setSleepOpen(true)}
-              className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 tabular-nums ${sleepLabel ? 'bg-wash font-semibold text-ink' : 'hover:bg-paper-2'}`}
-              aria-label={sleepLabel ? `Sleep timer: ${sleepLabel}` : 'Sleep timer'}
-            >
-              <Icon name="moon" size={14} /> {sleepLabel || 'Sleep'}
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  pause()
+                  const p = pos.current
+                  const sent = infoFor(p.chapter, p.block)?.sents[Math.max(0, p.sent)]
+                  setRsvp({
+                    chapter: p.chapter,
+                    block: p.block,
+                    offset: lastWord.current ?? sent?.start ?? 0,
+                  })
+                }}
+                className="inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 hover:bg-paper-2"
+                data-tour="speedread"
+              >
+                <Icon name="bolt" size={14} /> Speed read
+              </button>
+              <button
+                type="button"
+                onClick={() => setSleepOpen(true)}
+                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 tabular-nums ${sleepLabel ? 'bg-wash font-semibold text-ink' : 'hover:bg-paper-2'}`}
+                aria-label={sleepLabel ? `Sleep timer: ${sleepLabel}` : 'Sleep timer'}
+              >
+                <Icon name="moon" size={14} /> {sleepLabel || 'Sleep'}
+              </button>
             </span>
           </div>
           <div
@@ -1280,12 +1411,7 @@ export default function Reader({ id }: { id: string }) {
               <Icon name={playing ? 'pause' : 'play'} size={26} />
             </button>
             <IconButton icon="next" label="Next sentence" onClick={() => step(1)} />
-            <IconButton
-              icon="repeat"
-              label="Repeat this sentence"
-              onClick={repeatSentence}
-              className={settings.afterSentence !== 'continue' ? 'text-moss' : ''}
-            />
+            <IconButton icon="repeat" label="Repeat this sentence" onClick={repeatSentence} className={settings.afterSentence !== 'continue' ? 'text-moss' : ''} />
           </div>
         </div>
       </section>
@@ -1314,7 +1440,9 @@ export default function Reader({ id }: { id: string }) {
                 type="button"
                 aria-pressed={on}
                 onClick={() => {
-                  updateSettings({ rates: { ...settings.rates, [curLang]: r } })
+                  updateSettings({
+                    rates: { ...settings.rates, [curLang]: r },
+                  })
                   setSpeedOpen(false)
                 }}
                 className={`h-12 rounded-xl border font-semibold tabular-nums ${on ? 'border-moss bg-wash text-moss' : 'border-line hover:bg-paper-2'}`}
@@ -1325,7 +1453,8 @@ export default function Reader({ id }: { id: string }) {
           })}
         </div>
         <p className="pb-2 text-sm text-ink-2">
-          {!RATES.some((r) => Math.abs(r - curRate) < 0.01) && `Now ${fmtRate(curRate)}×. `}Each language keeps its own speed.{' '}
+          {!RATES.some((r) => Math.abs(r - curRate) < 0.01) && `Now ${fmtRate(curRate)}×. `}
+          Each language keeps its own speed.{' '}
           <button
             type="button"
             className="text-moss underline underline-offset-2"
@@ -1400,7 +1529,14 @@ export default function Reader({ id }: { id: string }) {
                   max={3}
                   step={0.05}
                   value={r}
-                  onChange={(e) => updateSettings({ rates: { ...settings.rates, [lang]: Number(e.target.value) } })}
+                  onChange={(e) =>
+                    updateSettings({
+                      rates: {
+                        ...settings.rates,
+                        [lang]: Number(e.target.value),
+                      },
+                    })
+                  }
                   className="w-full"
                 />
               </div>
@@ -1447,24 +1583,37 @@ export default function Reader({ id }: { id: string }) {
                     <select
                       id={'v-' + lang}
                       value={chosen?.voiceURI}
-                      onChange={(e) => updateSettings({ voices: { ...settings.voices, [lang]: e.target.value } })}
+                      onChange={(e) =>
+                        updateSettings({
+                          voices: {
+                            ...settings.voices,
+                            [lang]: e.target.value,
+                          },
+                        })
+                      }
                       className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-paper-2 px-3"
                     >
                       {list.map((v) => (
                         <option key={v.voiceURI} value={v.voiceURI}>
-                          {v.name} ({v.lang}){v.localService ? '' : ' · online'}{voiceTier(v) < 2 ? ' · basic' : ''}
+                          {v.name} ({v.lang}){v.localService ? '' : ' · online'}
+                          {voiceTier(v) < 2 ? ' · basic' : ''}
                         </option>
                       ))}
                     </select>
-                    <IconButton icon="speaker" label={`Hear the ${LANG_NAMES[lang] || lang} voice`} onClick={() => {
+                    <IconButton
+                      icon="speaker"
+                      label={`Hear the ${LANG_NAMES[lang] || lang} voice`}
+                      onClick={() => {
                         pause()
                         speakWord(SAMPLES[lang] || SAMPLES.en, lang, chosen?.voiceURI, rateFor(settings, lang))
-                      }} className="border border-line" />
+                      }}
+                      className="border border-line"
+                    />
                   </div>
                 ) : (
                   <p className="rounded-xl bg-paper-2 px-3 py-2 text-sm text-ink-2">
-                    No {LANG_NAMES[lang] || lang} voice on this device. On iPhone: Settings › Accessibility › Spoken Content › Voices. On Android: Settings › Text-to-speech ›
-                    Install voice data. On Windows: Settings › Time &amp; language › Speech. Then reopen this page.
+                    No {LANG_NAMES[lang] || lang} voice on this device. On iPhone: Settings › Accessibility › Spoken Content › Voices. On Android: Settings › Text-to-speech › Install voice data. On
+                    Windows: Settings › Time &amp; language › Speech. Then reopen this page.
                   </p>
                 )}
               </div>
@@ -1472,7 +1621,12 @@ export default function Reader({ id }: { id: string }) {
           })}
           {chapterLangs.some((l) => onlyBasic(l)) && !settings.showAllVoices && (
             <p className="mb-3 rounded-xl bg-paper-2 px-3 py-2 text-sm text-ink-2">
-              This device only has a basic {chapterLangs.filter((l) => onlyBasic(l)).map((l) => LANG_NAMES[l] || l).join(' and ')} voice. {betterVoiceHint()}
+              This device only has a basic{' '}
+              {chapterLangs
+                .filter((l) => onlyBasic(l))
+                .map((l) => LANG_NAMES[l] || l)
+                .join(' and ')}{' '}
+              voice. {betterVoiceHint()}
             </p>
           )}
           <p className="text-xs text-ink-3">
@@ -1501,15 +1655,24 @@ export default function Reader({ id }: { id: string }) {
                   <span className="min-w-0 flex-1 truncate" dir="auto">
                     <span className="font-semibold">{p.from}</span> <span className="text-ink-3">says</span> {p.to}
                   </span>
-                  <IconButton icon="speaker" label={`Hear ${p.from}`} size={17} onClick={() => {
-                    pause()
-                    speakWord(p.to, meta.lang, settings.voices[meta.lang])
-                  }} />
+                  <IconButton
+                    icon="speaker"
+                    label={`Hear ${p.from}`}
+                    size={17}
+                    onClick={() => {
+                      pause()
+                      speakWord(p.to, meta.lang, settings.voices[meta.lang])
+                    }}
+                  />
                   <IconButton
                     icon="trash"
                     label={`Remove ${p.from}`}
                     size={17}
-                    onClick={() => updateSettings({ pronunciations: settings.pronunciations.filter((_, j) => j !== i) })}
+                    onClick={() =>
+                      updateSettings({
+                        pronunciations: settings.pronunciations.filter((_, j) => j !== i),
+                      })
+                    }
                   />
                 </li>
               ))}
@@ -1520,13 +1683,29 @@ export default function Reader({ id }: { id: string }) {
             onSubmit={(e) => {
               e.preventDefault()
               if (!newFrom.trim() || !newTo.trim()) return
-              updateSettings({ pronunciations: [...settings.pronunciations, { from: newFrom.trim(), to: newTo.trim() }] })
+              updateSettings({
+                pronunciations: [...settings.pronunciations, { from: newFrom.trim(), to: newTo.trim() }],
+              })
               setNewFrom('')
               setNewTo('')
             }}
           >
-            <input value={newFrom} onChange={(e) => setNewFrom(e.target.value)} placeholder="Word" dir="auto" aria-label="Word as written" className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-paper-2 px-3" />
-            <input value={newTo} onChange={(e) => setNewTo(e.target.value)} placeholder="Say it as" dir="auto" aria-label="Say it as" className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-paper-2 px-3" />
+            <input
+              value={newFrom}
+              onChange={(e) => setNewFrom(e.target.value)}
+              placeholder="Word"
+              dir="auto"
+              aria-label="Word as written"
+              className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-paper-2 px-3"
+            />
+            <input
+              value={newTo}
+              onChange={(e) => setNewTo(e.target.value)}
+              placeholder="Say it as"
+              dir="auto"
+              aria-label="Say it as"
+              className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-paper-2 px-3"
+            />
             <button type="submit" disabled={!newFrom.trim() || !newTo.trim()} className="h-11 rounded-xl bg-moss px-4 font-semibold text-moss-ink disabled:opacity-40">
               Add
             </button>
@@ -1550,8 +1729,7 @@ export default function Reader({ id }: { id: string }) {
         <section className="mb-6">
           <h3 className="mb-1 font-semibold">Languages you’re learning</h3>
           <p className="mb-2 text-sm text-ink-3">
-            In these, words you haven’t marked known have a <span className="nw text-ink">dotted underline</span> and saved words are{' '}
-            <span className="lw text-ink">underlined</span>.
+            In these, words you haven’t marked known have a <span className="nw text-ink">dotted underline</span> and saved words are <span className="lw text-ink">underlined</span>.
           </p>
           <div className="flex flex-wrap gap-1.5">
             {Object.entries(LANG_NAMES).map(([k, v]) => {
@@ -1561,7 +1739,11 @@ export default function Reader({ id }: { id: string }) {
                   key={k}
                   type="button"
                   aria-pressed={on}
-                  onClick={() => updateSettings({ learning: on ? settings.learning.filter((x) => x !== k) : [...settings.learning, k] })}
+                  onClick={() =>
+                    updateSettings({
+                      learning: on ? settings.learning.filter((x) => x !== k) : [...settings.learning, k],
+                    })
+                  }
                   className={`h-8 rounded-full border px-3 text-sm ${on ? 'border-moss bg-wash font-semibold' : 'border-line text-ink-2'}`}
                 >
                   {v}
@@ -1594,9 +1776,27 @@ export default function Reader({ id }: { id: string }) {
         <section className="mb-6 flex items-center justify-between gap-4">
           <h3 className="font-semibold">Text size</h3>
           <div className="flex items-center gap-1">
-            <IconButton icon="minus" label="Smaller text" onClick={() => updateSettings({ fontSize: Math.max(14, settings.fontSize - 1) })} className="border border-line" />
+            <IconButton
+              icon="minus"
+              label="Smaller text"
+              onClick={() =>
+                updateSettings({
+                  fontSize: Math.max(14, settings.fontSize - 1),
+                })
+              }
+              className="border border-line"
+            />
             <span className="w-10 text-center tabular-nums">{settings.fontSize}</span>
-            <IconButton icon="plus" label="Larger text" onClick={() => updateSettings({ fontSize: Math.min(32, settings.fontSize + 1) })} className="border border-line" />
+            <IconButton
+              icon="plus"
+              label="Larger text"
+              onClick={() =>
+                updateSettings({
+                  fontSize: Math.min(32, settings.fontSize + 1),
+                })
+              }
+              className="border border-line"
+            />
           </div>
         </section>
 
@@ -1677,12 +1877,7 @@ export default function Reader({ id }: { id: string }) {
           />
         </section>
 
-        <Toggle
-          checked={settings.autoScroll}
-          onChange={(v) => updateSettings({ autoScroll: v })}
-          title="Follow along"
-          hint="Scroll to keep the spoken sentence in view."
-        />
+        <Toggle checked={settings.autoScroll} onChange={(v) => updateSettings({ autoScroll: v })} title="Follow along" hint="Scroll to keep the spoken sentence in view." />
         <p className="pb-2 text-xs text-ink-3">Tip: tap a word to look it up, double-tap it to start reading from there.</p>
       </Sheet>
 
@@ -1711,7 +1906,10 @@ export default function Reader({ id }: { id: string }) {
           const h = openHl
           if (!h) return
           setOpenHl(null)
-          setViewPage({ page: content.chapters[h.chapter]?.pageIdx?.[h.startBlock] ?? 0, label: h.page?.split('–')[0] })
+          setViewPage({
+            page: content.chapters[h.chapter]?.pageIdx?.[h.startBlock] ?? 0,
+            label: h.page?.split('–')[0],
+          })
         }}
         onLookUp={() => {
           const h = openHl
@@ -1722,9 +1920,19 @@ export default function Reader({ id }: { id: string }) {
           const b = t && t.b >= h.startBlock && t.b <= h.endBlock ? t.b : h.startBlock
           const info = infoFor(h.chapter, b)
           const text = content.chapters[h.chapter].blocks[b]
-          const w = (t && t.b === b ? t : null) || info?.words.find((x) => x.start >= h.start) || { start: h.start, end: h.start + 1 }
+          const w = (t && t.b === b ? t : null) ||
+            info?.words.find((x) => x.start >= h.start) || {
+              start: h.start,
+              end: h.start + 1,
+            }
           const sent = info?.sents.find((s) => w.start >= s.start && w.start < s.end) || { start: 0, end: text.length }
-          setPicked({ word: text.slice(w.start, w.end), lang: info?.lang || meta.lang, sentence: text.slice(sent.start, sent.end).trim(), block: b, start: w.start })
+          setPicked({
+            word: text.slice(w.start, w.end),
+            lang: info?.lang || meta.lang,
+            sentence: text.slice(sent.start, sent.end).trim(),
+            block: b,
+            start: w.start,
+          })
         }}
       />
 
@@ -1733,8 +1941,15 @@ export default function Reader({ id }: { id: string }) {
           content={content}
           start={rsvp}
           infoFor={infoFor}
+          voicePlaying={playing}
+          voiceSpot={hl}
+          onVoicePlay={playFrom}
+          onVoicePause={pause}
+          onLookup={lookupFromSpeed}
+          seek={rsvpSeek}
           onClose={(at) => {
             setRsvp(null)
+            setRsvpSeek(null)
             goTo(at.chapter, at.block, at.start, at.end)
           }}
         />
@@ -1743,4 +1958,3 @@ export default function Reader({ id }: { id: string }) {
     </div>
   )
 }
-

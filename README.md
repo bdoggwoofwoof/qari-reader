@@ -27,7 +27,7 @@ A personal replacement for Speechify: read PDFs and EPUBs aloud with word-by-wor
 - **Tour** – on first launch a six-step tour shows the library and, on a short sample, the reader. Take it again from the ⋯ menu in the library, which also holds sync, voices, light/dark mode and backups.
 - **Backups** – *Download a backup* saves every book, original PDF, note and saved word in one file; *Restore from a backup* adds back anything missing. If the library is only on this device and the browser could clear it (Safari does after a while unless Qari is on the Home Screen), the library says so once and offers sync or a backup.
 
-- **Easier reading** – reading settings offer fonts made for dyslexia (OpenDyslexic, Lexend, Atkinson Hyperlegible) with their own spacing, and *Bold word starts* (bionic reading) for Latin-script text. **Speed read** (above the play button) shows one word at a time in a fixed spot with a red focus letter, 100–1000 words a minute, pausing longer at commas and full stops; closing it puts your place on the last word shown. All of these work for every kind of book.
+- **Easier reading** – reading settings offer fonts made for dyslexia (OpenDyslexic, Lexend, Atkinson Hyperlegible) with their own spacing, and *Bold word starts* (bionic reading) for Latin-script text. **Speed read** (above the play button) shows one word at a time in a fixed spot with a red focus letter, 100–1000 words a minute, pausing longer at commas and full stops; closing it puts your place on the last word shown. Pause (tap anywhere) to look up the word on screen or any word in this sentence or the one before; *Read aloud* lets the voice read along and set the pace. All of these work for every kind of book.
 
 Gestures: tap a word to look it up, double-tap it to read from there.
 Keyboard: Space = play/pause, ← / → = previous / next sentence, R = repeat sentence.
@@ -67,3 +67,7 @@ This is the central doc for Qari: each working session adds a dated entry here.
 - **Decisions:** speed reading runs silently at its own speed rather than following the voice. Bionic reading and the dyslexia font's size and spacing apply to left-to-right text only; Arabic keeps its own font, because letter spacing breaks Arabic letter joining. The new settings sync between devices.
 - **Status:** live at qari-reader.vercel.app; tested on a phone-sized screen with a PDF and an EPUB.
 - **Open:** iPhone web apps can only use Apple's pre-installed (basic) voices, so getting good voices on the phone needs voices built into Qari (Piper/Kokoro, free) or Azure (free tier, then paid). Newt hasn't chosen yet. Earlier this week: only natural-sounding voices are listed, there's a light/dark switch, a guided tour, and light and dark icons.
+
+### Oct 27, 2026 (later)
+- **Changed:** in the speed reader, pausing now lets you look up the word on screen or any word in the current or previous sentence, using the same lookup as the page. Nothing extra shows while it's playing. A *Read aloud* switch lets the voice read along: the word on screen follows the voice, and the speed controls change the voice speed.
+- **Status:** good iPhone voices are still blocked by Apple (web apps only get the pre-installed basic voices). Waiting on Newt's choice: voices built into Qari, or Azure.
