@@ -30,6 +30,7 @@ const paths: Record<string, ReactNode> = {
   note: <path d="M5 4h14v12l-4 4H5zM15 20v-4h4M8 9h8M8 13h5" />,
   folder: <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />,
   cloud: <path d="M7 18h10a4 4 0 00.6-7.96A6 6 0 006.2 9.1 4.5 4.5 0 007 18z" />,
+  rise: <path d="M4 17l6-6 4 4 6-7M15 8h5v5" />,
   bolt: <path d="M13 3L5 14h6l-1 7 8-11h-6z" />,
   close: <path d="M6 6l12 12M18 6L6 18" />,
   trash: <path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" />,

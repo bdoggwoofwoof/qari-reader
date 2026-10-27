@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { stripArabicMarks, type Span } from '../lib/lang'
 import { useSettings } from '../lib/settings'
 import { RTL_LANGS, type DocContent, type Lang } from '../types'
-import { Icon, IconButton } from './ui'
+import { Icon, IconButton, Sheet } from './ui'
 
 interface BlockInfo {
   lang: Lang
@@ -24,6 +24,16 @@ interface Item {
 
 const MIN_WPM = 100
 const MAX_WPM = 1000
+
+/** Warm-up: start slower and speed up a little at a time while you read, up to a goal. */
+const PACES = {
+  gentle: { label: 'Gentle', step: 25, every: 60, hint: '+25 a minute' },
+  steady: { label: 'Steady', step: 25, every: 30, hint: '+25 every 30 s' },
+  quick: { label: 'Quick', step: 50, every: 30, hint: '+50 every 30 s' },
+} as const
+type Pace = keyof typeof PACES
+const fmtClimb = (secs: number) => (secs >= 60 ? `${Math.round(secs / 60)} min` : `${secs} s`)
+const roundWpm = (n: number) => Math.max(MIN_WPM, Math.min(MAX_WPM, Math.round(n / 25) * 25))
 
 /** Letters before the focus letter, by word length — a little left of centre, where the eye naturally lands. */
 function focusIndex(letters: number) {
@@ -96,6 +106,11 @@ export default function SpeedReader({
   const [settings, updateSettings] = useSettings()
   const wpm = settings.speedWpm || 300
   const voiceOn = !!settings.speedVoice
+  const [warm, setWarm] = useState<{ wpm: number; from: number; goal: number; step: number; every: number; elapsed: number } | null>(null)
+  const [warmOpen, setWarmOpen] = useState(false)
+  const warmPlan = settings.speedWarm || { start: 200, goal: Math.max(400, roundWpm(wpm + 100)), pace: 'steady' as Pace }
+  const pace = (PACES as Record<string, (typeof PACES)[Pace]>)[warmPlan.pace] || PACES.steady
+  const speed = warm ? warm.wpm : wpm // the speed words are shown at right now
   const [items, setItems] = useState<Item[]>([])
   const [loadedTo, setLoadedTo] = useState(start.chapter - 1)
   const [i, setI] = useState(0)
@@ -212,12 +227,12 @@ export default function SpeedReader({
   useEffect(() => {
     if (voiceOn || !playing || !cur) return
     if (atEnd) {
-      timer.current = window.setTimeout(() => setPlaying(false), (60000 / wpm) * cur.pause)
+      timer.current = window.setTimeout(() => setPlaying(false), (60000 / speed) * cur.pause)
       return () => clearTimeout(timer.current!)
     }
-    timer.current = window.setTimeout(() => setI((n) => n + 1), (60000 / wpm) * cur.pause)
+    timer.current = window.setTimeout(() => setI((n) => n + 1), (60000 / speed) * cur.pause)
     return () => clearTimeout(timer.current!)
-  }, [voiceOn, playing, i, cur, wpm, atEnd])
+  }, [voiceOn, playing, i, cur, speed, atEnd])
 
   // Keep the screen on while words are flashing.
   useEffect(() => {
@@ -239,6 +254,7 @@ export default function SpeedReader({
 
   const close = useCallback(() => {
     setPlaying(false)
+    if (warm) updateSettings({ speedWpm: roundWpm(warm.wpm) })
     onVoicePause()
     if (cur) onClose({ chapter: cur.c, block: cur.b, start: cur.start, end: cur.end })
     else
@@ -248,7 +264,7 @@ export default function SpeedReader({
         start: start.offset,
         end: start.offset,
       })
-  }, [cur, onClose, start, onVoicePause])
+  }, [cur, onClose, start, onVoicePause, warm, updateSettings])
 
   /** Back to the start of this sentence, or the previous one if you're already at the start. */
   const back = useCallback(() => {
@@ -269,6 +285,36 @@ export default function SpeedReader({
     while (k < items.length - 1 && items[k].b === cur.b && items[k].sent === cur.sent) k++
     goToItem(k)
   }, [cur, i, items, goToItem])
+
+  // Warm-up clock: only counts time spent reading.
+  useEffect(() => {
+    if (!warm || voiceOn || !playing || warm.wpm >= warm.goal) return
+    const t = window.setInterval(() => {
+      setWarm((w) => {
+        if (!w) return w
+        const elapsed = w.elapsed + 1
+        if (elapsed < w.every) return { ...w, elapsed }
+        return { ...w, wpm: Math.min(w.goal, w.wpm + w.step), elapsed: 0 }
+      })
+    }, 1000)
+    return () => clearInterval(t)
+  }, [warm, voiceOn, playing])
+
+  const startWarm = () => {
+    setWarmOpen(false)
+    setWarm({ wpm: warmPlan.start, from: warmPlan.start, goal: Math.max(warmPlan.goal, warmPlan.start), step: pace.step, every: pace.every, elapsed: 0 })
+    if (voiceOn) {
+      onVoicePause()
+      updateSettings({ speedVoice: false })
+    }
+    setPlaying(true)
+  }
+  /** Ends the warm-up and keeps the speed you reached as your speed. */
+  const stopWarm = () => {
+    if (warm) updateSettings({ speedWpm: roundWpm(warm.wpm) })
+    setWarm(null)
+  }
+  const setPlan = (patch: Partial<typeof warmPlan>) => updateSettings({ speedWarm: { ...warmPlan, ...patch } })
 
   const setWpm = useCallback(
     (n: number) =>
@@ -362,7 +408,7 @@ export default function SpeedReader({
       .slice(i)
       .filter((it) => it.c === cur?.c)
       .reduce((t, it) => t + it.pause, 0) *
-    (60 / wpm)
+    (60 / speed)
   const parts = cur ? split(cur.text) : null
   const section = cur ? content.chapters[cur.c]?.title : ''
 
@@ -475,16 +521,31 @@ export default function SpeedReader({
       <footer className="mx-auto w-full max-w-md px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <div className="mb-2 flex justify-between text-xs tabular-nums text-ink-3">
           <span>{voiceOn ? 'The voice sets the pace' : `${left < 60 ? 'under a minute' : `${Math.round(left / 60)} min`} left in section`}</span>
-          <span>{atEnd && !isPlaying ? 'The end' : ''}</span>
+          {voiceOn ? (
+            <span>{atEnd && !isPlaying ? 'The end' : ''}</span>
+          ) : warm ? (
+            <button type="button" onClick={stopWarm} className="inline-flex items-center gap-1 rounded-full bg-wash px-2 py-0.5 font-semibold text-ink" aria-label="Stop warming up and keep this speed">
+              {warm.wpm >= warm.goal ? `Goal reached: ${warm.goal}` : `Warming up to ${warm.goal}`} <Icon name="close" size={12} />
+            </button>
+          ) : (
+            <button type="button" onClick={() => setWarmOpen(true)} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 hover:bg-paper-2">
+              <Icon name="rise" size={13} /> Warm up
+            </button>
+          )}
         </div>
+        {warm && warm.wpm < warm.goal && (
+          <div className="mb-2 h-1 overflow-hidden rounded-full bg-line" aria-hidden="true">
+            <div className="h-full bg-moss transition-[width] duration-700" style={{ width: `${Math.round(((warm.wpm - warm.from) / Math.max(1, warm.goal - warm.from)) * 100)}%` }} />
+          </div>
+        )}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1">
-            <IconButton icon="minus" label="Slower" onClick={() => (voiceOn ? stepRate(-1) : setWpm(wpm - 25))} className="border border-line" />
+            <IconButton icon="minus" label="Slower" onClick={() => (voiceOn ? stepRate(-1) : warm ? setWarm({ ...warm, wpm: roundWpm(warm.wpm - 25), elapsed: 0 }) : setWpm(wpm - 25))} className="border border-line" />
             <span className="w-16 text-center text-sm font-semibold tabular-nums" aria-live="polite">
-              {voiceOn ? `${Number.isInteger(rate) ? rate.toFixed(1) : Number(rate.toFixed(2))}×` : wpm}
+              {voiceOn ? `${Number.isInteger(rate) ? rate.toFixed(1) : Number(rate.toFixed(2))}×` : speed}
               <span className="block text-[0.65rem] font-normal text-ink-3">{voiceOn ? 'voice speed' : 'words/min'}</span>
             </span>
-            <IconButton icon="plus" label="Faster" onClick={() => (voiceOn ? stepRate(1) : setWpm(wpm + 25))} className="border border-line" />
+            <IconButton icon="plus" label="Faster" onClick={() => (voiceOn ? stepRate(1) : warm ? setWarm({ ...warm, wpm: roundWpm(warm.wpm + 25), elapsed: 0 }) : setWpm(wpm + 25))} className="border border-line" />
           </div>
           <div className="flex items-center gap-1">
             <IconButton icon="prev" label="Back a sentence" onClick={back} />
@@ -500,6 +561,48 @@ export default function SpeedReader({
           </div>
         </div>
       </footer>
+      <Sheet open={warmOpen} onClose={() => setWarmOpen(false)} title="Warm up">
+        <p className="mb-4 text-sm text-ink-2">Start at a comfortable speed and let Qari speed up a little at a time while you read. It only counts time you’re reading, and you can slow it down with − at any point.</p>
+        {(
+          [
+            ['Start at', 'start'],
+            ['Goal', 'goal'],
+          ] as const
+        ).map(([label, key]) => (
+          <div key={key} className="mb-3 flex items-center justify-between">
+            <span className="font-semibold">{label}</span>
+            <span className="flex items-center gap-1">
+              <IconButton icon="minus" label={`${label}: slower`} onClick={() => setPlan({ [key]: roundWpm(warmPlan[key] - 25) })} className="border border-line" />
+              <span className="w-20 text-center tabular-nums">
+                {warmPlan[key]} <span className="text-xs text-ink-3">wpm</span>
+              </span>
+              <IconButton icon="plus" label={`${label}: faster`} onClick={() => setPlan({ [key]: roundWpm(warmPlan[key] + 25) })} className="border border-line" />
+            </span>
+          </div>
+        ))}
+        <div className="mb-1 font-semibold">How fast it climbs</div>
+        <div className="mb-4 grid grid-cols-3 gap-2">
+          {(Object.entries(PACES) as [Pace, (typeof PACES)[Pace]][]).map(([k, p]) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setPlan({ pace: k })}
+              aria-pressed={warmPlan.pace === k}
+              className={`rounded-xl border px-2 py-2 text-center ${warmPlan.pace === k ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
+            >
+              <span className="block text-sm">{p.label}</span>
+              <span className="block text-xs font-normal text-ink-3">{p.hint}</span>
+            </button>
+          ))}
+        </div>
+        <p className="mb-3 text-sm text-ink-3">
+          {warmPlan.goal > warmPlan.start ? `About ${fmtClimb(Math.ceil((warmPlan.goal - warmPlan.start) / pace.step) * pace.every)} of reading to reach your goal.` : 'Set a goal above where you start.'}
+          {voiceOn ? ' Warm-up reads silently, so Read aloud turns off.' : ''}
+        </p>
+        <button type="button" onClick={startWarm} className="mb-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-moss font-semibold text-moss-ink">
+          <Icon name="rise" size={18} /> Start warm-up
+        </button>
+      </Sheet>
     </div>
   )
 }
