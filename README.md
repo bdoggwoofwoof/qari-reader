@@ -27,6 +27,8 @@ A personal replacement for Speechify: read PDFs and EPUBs aloud with word-by-wor
 - **Tour** – on first launch a six-step tour shows the library and, on a short sample, the reader. Take it again from the ⋯ menu in the library, which also holds sync, voices, light/dark mode and backups.
 - **Backups** – *Download a backup* saves every book, original PDF, note and saved word in one file; *Restore from a backup* adds back anything missing. If the library is only on this device and the browser could clear it (Safari does after a while unless Qari is on the Home Screen), the library says so once and offers sync or a backup.
 
+- **Easier reading** – reading settings offer fonts made for dyslexia (OpenDyslexic, Lexend, Atkinson Hyperlegible) with their own spacing, and *Bold word starts* (bionic reading) for Latin-script text. **Speed read** (above the play button) shows one word at a time in a fixed spot with a red focus letter, 100–1000 words a minute, pausing longer at commas and full stops; closing it puts your place on the last word shown. All of these work for every kind of book.
+
 Gestures: tap a word to look it up, double-tap it to read from there.
 Keyboard: Space = play/pause, ← / → = previous / next sentence, R = repeat sentence.
 

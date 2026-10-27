@@ -4,7 +4,7 @@ import Reader from './components/Reader'
 import Words from './components/Words'
 import Tour from './components/Tour'
 import { useSettings } from './lib/settings'
-import { ARABIC_FONTS } from './types'
+import { ARABIC_FONTS, READ_FONTS } from './types'
 
 function useHashRoute() {
   const [hash, setHash] = useState(() => window.location.hash)
@@ -47,6 +47,16 @@ export default function App() {
     st.setProperty('--arabic-size', f.size)
     st.setProperty('--arabic-leading', f.leading)
   }, [settings.arabicFont])
+
+  useEffect(() => {
+    const f = READ_FONTS[settings.readFont || 'literata'] || READ_FONTS.literata
+    const st = document.documentElement.style
+    st.setProperty('--read-face', f.family)
+    st.setProperty('--read-size', f.size)
+    st.setProperty('--read-leading', f.leading)
+    st.setProperty('--read-spacing', f.spacing)
+    st.setProperty('--read-word-spacing', f.wordSpacing)
+  }, [settings.readFont])
 
   const screen =
     route[0] === 'read' && route[1] ? (

@@ -7,11 +7,12 @@ import type { SearchHit } from '../lib/search'
 import BookPanel, { type PanelTab } from './BookPanel'
 import HighlightSheet from './HighlightSheet'
 import PageViewer from './PageViewer'
+import SpeedReader from './SpeedReader'
 import { detectLang, isMostlyArabic, sentences, stripArabicMarks, words, type Span } from '../lib/lang'
 import { rateFor, useSettings } from '../lib/settings'
 import { speechText } from '../lib/speechText'
 import { voiceTier, betterVoiceHint, CHARS_PER_SEC, getVoices, SAMPLES, onlyBasic, onVoicesChanged, pickVoice, SentenceSpeaker, speechSupported, speakWord, voicesFor } from '../lib/tts'
-import { ARABIC_FONTS, LANG_NAMES, RTL_LANGS, type ArabicFont, type DocContent, type DocMeta, type Highlight, type Lang } from '../types'
+import { ARABIC_FONTS, LANG_NAMES, READ_FONTS, RTL_LANGS, type ArabicFont, type ReadFont, type DocContent, type DocMeta, type Highlight, type Lang } from '../types'
 import LookupSheet, { type Picked } from './LookupSheet'
 import { claudeStatus } from '../lib/translate'
 import { countNew, isKnown, isLearning, isTrackable, setKnown, useVocab, vocabKey } from '../lib/vocab'
@@ -73,6 +74,7 @@ const Block = memo(function Block({
   marks,
   flash,
   vocab,
+  bionic,
 }: {
   text: string
   index: number
@@ -85,6 +87,7 @@ const Block = memo(function Block({
   marks?: Mark[]
   flash?: string // "start:end" of a search result to flash, or undefined
   vocab?: Map<number, 'new' | 'learning'> // word start → status, in languages you're learning
+  bionic?: boolean
 }) {
   const [fs, fe] = flash ? flash.split(':').map(Number) : [-1, -1]
   const rtl = RTL_LANGS.has(info.lang)
@@ -113,7 +116,7 @@ const Block = memo(function Block({
         `${vocab?.get(w.start) === 'new' ? ' nw' : vocab?.get(w.start) === 'learning' ? ' lw' : ''}`
       inner.push(
         <span key={w.start} className={cls} data-b={index} data-s={w.start} data-e={w.end} data-h={m?.id}>
-          {show(text.slice(w.start, w.end))}
+          {bionic && !rtl ? bionicWord(text.slice(w.start, w.end)) : show(text.slice(w.start, w.end))}
         </span>,
       )
       c = w.end
@@ -135,6 +138,28 @@ const Block = memo(function Block({
     </Tag>
   )
 })
+
+/** Bionic reading: bold roughly the first half of a word (fewer letters in long words), so the eye lands on it and the brain fills in the rest. */
+function bionicWord(word: string): React.ReactNode {
+  const letters = [...word]
+  const n = letters.filter((ch) => /\p{L}/u.test(ch)).length
+  if (!n) return word
+  const bold = n <= 3 ? 1 : n <= 5 ? 2 : Math.ceil(n * 0.42)
+  let seen = 0
+  let cut = 0
+  while (cut < letters.length && seen < bold) {
+    if (/\p{L}/u.test(letters[cut])) seen++
+    cut++
+  }
+  // Keep accents and other combining marks with their letter.
+  while (cut < letters.length && /\p{M}/u.test(letters[cut])) cut++
+  return (
+    <>
+      <b className="bio">{letters.slice(0, cut).join('')}</b>
+      {letters.slice(cut).join('')}
+    </>
+  )
+}
 
 function Toggle({ checked, onChange, title, hint }: { checked: boolean; onChange: (v: boolean) => void; title: string; hint: string }) {
   return (
@@ -170,6 +195,7 @@ export default function Reader({ id }: { id: string }) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [sleepOpen, setSleepOpen] = useState(false)
   const [speedOpen, setSpeedOpen] = useState(false)
+  const [rsvp, setRsvp] = useState<{ chapter: number; block: number; offset: number } | null>(null)
   const [sleep, setSleepState] = useState<Sleep>({ kind: 'off' })
   const [now, setNow] = useState(Date.now())
   const [away, setAway] = useState(false)
@@ -1106,6 +1132,7 @@ export default function Reader({ id }: { id: string }) {
                 harakat={settings.showHarakat}
                 marks={blockMarks[b]}
                 vocab={blockVocab[b]}
+                bionic={!!settings.bionic}
                 flash={flash && flash.chapter === chapter && flash.block === b ? `${flash.start}:${flash.end}` : undefined}
               />
             </div>
@@ -1190,17 +1217,32 @@ export default function Reader({ id }: { id: string }) {
         )}
         <div className="mx-auto max-w-md rounded-[28px] border border-line bg-paper/95 px-2 pt-2 pb-1.5 shadow-[0_6px_30px_rgb(0_0_0/0.10)] backdrop-blur">
           <div className="flex items-center justify-between gap-3 px-3 text-xs text-ink-3">
-            <span className="tabular-nums" aria-live="off">
-              {fmtMinutes(secsLeft)} left in section
+            <span className="min-w-0 truncate tabular-nums" aria-live="off">
+              {fmtMinutes(secsLeft)} left<span className="max-[420px]:hidden"> in section</span>
             </span>
+            <span className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                pause()
+                const p = pos.current
+                const sent = infoFor(p.chapter, p.block)?.sents[Math.max(0, p.sent)]
+                setRsvp({ chapter: p.chapter, block: p.block, offset: lastWord.current ?? sent?.start ?? 0 })
+              }}
+              className="inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 hover:bg-paper-2"
+              data-tour="speedread"
+            >
+              <Icon name="bolt" size={14} /> Speed read
+            </button>
             <button
               type="button"
               onClick={() => setSleepOpen(true)}
-              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 tabular-nums ${sleepLabel ? 'bg-wash font-semibold text-ink' : 'hover:bg-paper-2'}`}
+              className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 tabular-nums ${sleepLabel ? 'bg-wash font-semibold text-ink' : 'hover:bg-paper-2'}`}
               aria-label={sleepLabel ? `Sleep timer: ${sleepLabel}` : 'Sleep timer'}
             >
               <Icon name="moon" size={14} /> {sleepLabel || 'Sleep'}
             </button>
+            </span>
           </div>
           <div
             className="group mx-3 mt-1.5 mb-1 cursor-pointer py-1.5"
@@ -1575,6 +1617,41 @@ export default function Reader({ id }: { id: string }) {
         </section>
 
         <section className="mb-6">
+          <h3 className="mb-1 font-semibold">Easier reading</h3>
+          <p className="mb-3 text-sm text-ink-3">Fonts made for dyslexia, and bold word starts. They apply to every book; Arabic keeps its own font.</p>
+          <div className="mb-4 grid grid-cols-2 gap-2">
+            {(Object.entries(READ_FONTS) as [ReadFont, (typeof READ_FONTS)[ReadFont]][]).map(([k, f]) => {
+              const on = (settings.readFont || 'literata') === k
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => updateSettings({ readFont: k })}
+                  aria-pressed={on}
+                  className={`flex flex-col items-start rounded-xl border px-3 py-2 text-left ${on ? 'border-moss bg-wash' : 'border-line'}`}
+                >
+                  <span className="text-lg leading-snug" style={{ fontFamily: f.family, letterSpacing: f.spacing }}>
+                    Read along
+                  </span>
+                  <span className={`text-xs ${on ? 'font-semibold' : 'text-ink-2'}`}>
+                    {f.label} <span className="font-normal text-ink-3">· {f.hint}</span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          <Toggle
+            checked={!!settings.bionic}
+            onChange={(v) => updateSettings({ bionic: v })}
+            title="Bold word starts"
+            hint="Bionic reading: the first part of each word is bold, so your eye has an anchor and moves faster. Not used for Arabic."
+          />
+          <p className="-mt-2 text-sm text-ink-3">
+            For speed reading, tap <span className="font-semibold text-ink-2">Speed read</span> above the play button: one word at a time, with a red letter to keep your eye still.
+          </p>
+        </section>
+
+        <section className="mb-6">
           <h3 className="mb-2 font-semibold">Arabic</h3>
           <div className="mb-4 grid grid-cols-3 gap-2">
             {(Object.entries(ARABIC_FONTS) as [ArabicFont, (typeof ARABIC_FONTS)[ArabicFont]][]).map(([k, f]) => (
@@ -1651,6 +1728,17 @@ export default function Reader({ id }: { id: string }) {
         }}
       />
 
+      {rsvp && content && (
+        <SpeedReader
+          content={content}
+          start={rsvp}
+          infoFor={infoFor}
+          onClose={(at) => {
+            setRsvp(null)
+            goTo(at.chapter, at.block, at.start, at.end)
+          }}
+        />
+      )}
       {viewPage && <PageViewer docId={meta.id} page={viewPage.page} label={viewPage.label} onClose={() => setViewPage(null)} />}
     </div>
   )

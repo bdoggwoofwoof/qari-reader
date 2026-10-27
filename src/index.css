@@ -12,7 +12,7 @@
   --color-wash: var(--wash);
   --color-mark: var(--mark);
   --color-danger: var(--danger);
-  --font-read: 'Literata Variable', var(--arabic-face), Georgia, serif;
+  --font-read: var(--read-face, 'Literata Variable'), var(--arabic-face), Georgia, serif;
   --font-ui: 'Instrument Sans Variable', var(--arabic-face), system-ui, sans-serif;
   --font-arabic: var(--arabic-face), 'Literata Variable', sans-serif;
 }
@@ -86,7 +86,7 @@ body {
 /* ----- Reading surface ----- */
 .prose-read {
   font-family: var(--font-read);
-  line-height: 1.68;
+  line-height: var(--read-leading, 1.68);
   font-variation-settings: 'opsz' 14;
 }
 .prose-read p {
@@ -257,4 +257,19 @@ input[type='range'] {
 
 .w.now.nw {
   background: linear-gradient(180deg, transparent 14%, var(--mark) 14%, var(--mark) 88%, transparent 88%);
+}
+
+/* Reading font size and spacing apply to left-to-right text; Arabic keeps its own (spacing would break letter joining). */
+.prose-read :is(p, .h):not([dir='rtl']) {
+  font-size: var(--read-size, 1em);
+  letter-spacing: var(--read-spacing, 0);
+  word-spacing: var(--read-word-spacing, 0);
+}
+.prose-read .h:not([dir='rtl']) {
+  font-size: calc(var(--read-size, 1em) * 1.35);
+}
+
+/* Bionic reading: the first part of each word in bold, so the eye anchors on it. */
+.prose-read .bio {
+  font-weight: 700;
 }

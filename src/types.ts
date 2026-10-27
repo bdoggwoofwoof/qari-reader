@@ -78,6 +78,9 @@ export interface Settings {
   rates: Record<Lang, number> // speed per language; falls back to rate
   afterSentence: 'continue' | 'pause' | 'repeat'
   showHarakat: boolean
+  readFont?: ReadFont
+  bionic?: boolean // bold the start of each word
+  speedWpm?: number // speed reader, words per minute
   skipCitations: boolean
   pronunciations: Pronunciation[]
   voiceCheckDone: boolean
@@ -95,6 +98,15 @@ export interface Pronunciation {
 }
 
 export type ArabicFont = 'readex' | 'noto-sans' | 'naskh'
+export type ReadFont = 'literata' | 'opendyslexic' | 'lexend' | 'atkinson'
+
+/** Fonts for reading Latin-script text. The last three are designed to be easier to read with dyslexia. */
+export const READ_FONTS: Record<ReadFont, { label: string; hint: string; family: string; size: string; leading: string; spacing: string; wordSpacing: string }> = {
+  literata: { label: 'Literata', hint: 'Book', family: "'Literata Variable'", size: '1em', leading: '1.68', spacing: '0', wordSpacing: '0' },
+  opendyslexic: { label: 'OpenDyslexic', hint: 'Weighted letters', family: "'OpenDyslexic'", size: '0.88em', leading: '1.8', spacing: '0', wordSpacing: '0' },
+  lexend: { label: 'Lexend', hint: 'Wide, even', family: "'Lexend Variable'", size: '0.97em', leading: '1.8', spacing: '0.01em', wordSpacing: '0.08em' },
+  atkinson: { label: 'Atkinson', hint: 'Clear shapes', family: "'Atkinson Hyperlegible Next Variable'", size: '1.02em', leading: '1.75', spacing: '0.01em', wordSpacing: '0.06em' },
+}
 
 export const ARABIC_FONTS: Record<ArabicFont, { label: string; family: string; size: string; leading: string }> = {
   readex: { label: 'Readex Pro', family: "'Readex Pro Variable'", size: '1.04em', leading: '1.95' },
