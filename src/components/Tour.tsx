@@ -19,7 +19,7 @@ const STEPS: Step[] = [
   { where: 'library', title: 'Welcome to Qari', body: 'Qari reads your books, articles and class readings aloud, and lets you look up any word as you listen. Five quick things to know.' },
   { where: 'library', target: '[data-tour=add]', title: 'Add something to read', body: 'PDFs, EPUBs, Word files, web links, pasted text, or photos of printed pages.' },
   { where: 'library', target: '[data-tour=menu]', title: 'Sync, voices and backup', body: 'Keep your phone and laptop in step (encrypted), check which languages this device can read aloud, switch to dark mode, or download a backup.' },
-  { where: 'reader', target: words, title: 'Tap any word', body: 'Tap a word to see what it means: reading pauses and carries on when you close it. Double-tap to read from that word. Select a few words to highlight, add a note or translate.' },
+  { where: 'reader', target: words, title: 'Tap any word', body: 'Tap a word to start reading from there. Double-tap it to see what it means: reading pauses and carries on when you close it. Select a few words to highlight, add a note or translate.' },
   { where: 'reader', target: '[data-tour=play]', title: 'Play, speed and skip', body: 'The sentence being read is tinted and each word lights up as it’s spoken. Tap the speed on the left to change it; each language keeps its own.' },
   { where: 'reader', target: '[data-tour=speedread]', title: 'Speed read', body: 'One word at a time in the same spot, with a red letter to keep your eye still. Set how many words a minute; when you close it, your place is where you stopped.' },
   { where: 'reader', target: '[aria-label="Reading settings"]', title: 'Everything else is up here', body: 'Search, contents and notes, and reading settings (voices, text size, Arabic font, and dyslexia-friendly fonts and bold word starts). Take this tour again from the ⋯ menu in your library.' },
@@ -27,7 +27,7 @@ const STEPS: Step[] = [
 
 const SAMPLE = `This is a short sample so you can try Qari. Press play and listen: the sentence being read is tinted, and each word lights up as it is spoken.
 
-Tap any word to look it up. Reading pauses while you look, and you can save the word with this sentence to review later. Double-tap a word to start reading from there.
+Double-tap any word to look it up. Reading pauses while you look, and you can save the word with this sentence to review later. Tap a word once to start reading from there.
 
 Select a few words to highlight them, add a note, copy them as a quote, or translate them.
 

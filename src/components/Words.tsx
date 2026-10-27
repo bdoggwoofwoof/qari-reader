@@ -164,7 +164,7 @@ export default function Words() {
         {list && !list.length && (
           <div className="mt-16 text-center">
             <p className="font-read text-xl">No saved words yet.</p>
-            <p className="mt-2 text-ink-2">While reading, tap a word (or select a phrase and choose Look up), then Save. It’s kept with the sentence you found it in.</p>
+            <p className="mt-2 text-ink-2">While reading, double-tap a word (or select a phrase and choose Look up), then Save. It’s kept with the sentence you found it in.</p>
           </div>
         )}
 

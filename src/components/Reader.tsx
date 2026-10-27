@@ -965,7 +965,21 @@ export default function Reader({ id }: { id: string }) {
     navigator.mediaSession.setActionHandler('previoustrack', () => step(-1))
   }, [meta, play, pause, step])
 
-  // ---------- Tap a word: once to look it up, twice to read from there ----------
+  // ---------- Tap a word: once to read from there, twice to look it up ----------
+  /** Puts the reading place on a word: keeps reading from it if the voice is on, otherwise marks it so Play starts there. */
+  const startFrom = (b: number, start: number) => {
+    const info = infoFor(chapter, b)
+    if (!info?.sents.length) return
+    if (playingRef.current) return jumpTo(b, start)
+    const si = Math.max(0, info.sents.findIndex((s) => start >= s.start && start < s.end))
+    pos.current = { chapter, block: b, sent: si }
+    lastWord.current = start
+    repeated.current = false
+    userScrolledAt.current = Date.now() // it's already on screen
+    setHl({ chapter, block: b, sent: si, word: start })
+    persist()
+  }
+
   const onTextClick = (e: MouseEvent) => {
     const pg = (e.target as HTMLElement).closest('[data-page]') as HTMLElement | null
     if (pg && canShowOriginal) {
@@ -980,23 +994,14 @@ export default function Reader({ id }: { id: string }) {
     const t = Date.now()
     const prev = lastTap.current
     if (prev && prev.b === b && prev.s === start && t - prev.t < 320) {
+      // Double tap: look the word up (or open its highlight). Reading pauses and carries on after.
       if (tapTimer.current) clearTimeout(tapTimer.current)
       tapTimer.current = null
       lastTap.current = null
-      resumeAfterLookup.current = false
       window.getSelection()?.removeAllRanges()
-      jumpTo(b, start)
-      return
-    }
-    lastTap.current = { b, s: start, t }
-    // Stop the voice at once, so it doesn't read on (or turn the page) while we wait to see if this is a double tap.
-    if (playingRef.current) {
-      resumeAfterLookup.current = true
-      pause()
-    } else if (!tapTimer.current) resumeAfterLookup.current = false
-    if (tapTimer.current) clearTimeout(tapTimer.current)
-    tapTimer.current = window.setTimeout(() => {
-      tapTimer.current = null
+      setSelection(null)
+      resumeAfterLookup.current = playingRef.current
+      if (playingRef.current) pause()
       const info = infoFor(chapter, b)
       if (!info) return
       const hid = el.dataset.h
@@ -1015,6 +1020,14 @@ export default function Reader({ id }: { id: string }) {
         block: b,
         start,
       })
+      return
+    }
+    lastTap.current = { b, s: start, t }
+    if (tapTimer.current) clearTimeout(tapTimer.current)
+    // Wait a moment to see if a second tap is coming.
+    tapTimer.current = window.setTimeout(() => {
+      tapTimer.current = null
+      startFrom(b, start)
     }, 300)
   }
 
@@ -1878,7 +1891,7 @@ export default function Reader({ id }: { id: string }) {
         </section>
 
         <Toggle checked={settings.autoScroll} onChange={(v) => updateSettings({ autoScroll: v })} title="Follow along" hint="Scroll to keep the spoken sentence in view." />
-        <p className="pb-2 text-xs text-ink-3">Tip: tap a word to look it up, double-tap it to start reading from there.</p>
+        <p className="pb-2 text-xs text-ink-3">Tip: tap a word to start reading from there, double-tap it to look it up.</p>
       </Sheet>
 
       <LookupSheet

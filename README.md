@@ -9,7 +9,7 @@ A personal replacement for Speechify: read PDFs and EPUBs aloud with word-by-wor
 - **EPUB** – reads the spine and table of contents, skips footnotes; detects DRM-protected books and says so.
 - **Read aloud** – the device's own voices (free). Sentence-by-sentence playback, current sentence tinted and current word highlighted, speed 0.5–3×, skip by sentence, remembers your place, keeps the screen awake while playing, lock-screen controls where supported.
 - **Languages** – English, Arabic, French and German out of the box (plus Spanish, Italian, Portuguese, Dutch, Persian, Hebrew, Russian, Greek, Turkish, Urdu). Book language is detected; Arabic-script paragraphs inside a non-Arabic book switch to the Arabic voice automatically and display right-to-left.
-- **Word lookup** – tap a word: playback pauses, and picks up again from that word when you close the lookup. English definitions come from Wiktionary. Arabic lookups strip harakat and try likely base forms (ال، و، ب، ـها، ـات …); French elisions (l’homme) and inflected forms (“plural of …”) are followed to the base word. Links to Almaany / WordReference / Merriam-Webster; for Arabic also Lughatuna (Living Arabic Project, Levantine and Egyptian dictionaries), which copies the word without vowel marks so you can paste it into its search, and Google Translate for the sentence.
+- **Word lookup** – double-tap a word: playback pauses, and picks up again from that word when you close the lookup. English definitions come from Wiktionary. Arabic lookups strip harakat and try likely base forms (ال، و، ب، ـها، ـات …); French elisions (l’homme) and inflected forms (“plural of …”) are followed to the base word. Links to Almaany / WordReference / Merriam-Webster; for Arabic also Lughatuna (Living Arabic Project, Levantine and Egyptian dictionaries), which copies the word without vowel marks so you can paste it into its search, and Google Translate for the sentence.
 - **Saved words** – list by language, hear them, export a tab-separated file that Anki imports directly (word, meaning, sentence with the word in bold, source, language tag).
 - **Installable** – works as an app on iPhone/Android (Add to Home Screen) and desktop; opens offline once loaded.
 
@@ -29,7 +29,7 @@ A personal replacement for Speechify: read PDFs and EPUBs aloud with word-by-wor
 
 - **Easier reading** – reading settings offer fonts made for dyslexia (OpenDyslexic, Lexend, Atkinson Hyperlegible) with their own spacing, and *Bold word starts* (bionic reading) for Latin-script text. **Speed read** (above the play button) shows one word at a time in a fixed spot with a red focus letter, 100–1000 words a minute, pausing longer at commas and full stops; closing it puts your place on the last word shown. Pause (tap anywhere) to look up the word on screen or any word in this sentence or the one before; *Read aloud* lets the voice read along and set the pace. All of these work for every kind of book.
 
-Gestures: tap a word to look it up, double-tap it to read from there.
+Gestures: tap a word to read from there (or to mark where Play starts), double-tap it to look it up.
 Keyboard: Space = play/pause, ← / → = previous / next sentence, R = repeat sentence.
 
 ## Run it
@@ -71,3 +71,6 @@ This is the central doc for Qari: each working session adds a dated entry here.
 ### Oct 27, 2026 (later)
 - **Changed:** in the speed reader, pausing now lets you look up the word on screen or any word in the current or previous sentence, using the same lookup as the page. Nothing extra shows while it's playing. A *Read aloud* switch lets the voice read along: the word on screen follows the voice, and the speed controls change the voice speed.
 - **Status:** good iPhone voices are still blocked by Apple (web apps only get the pre-installed basic voices). Waiting on Newt's choice: voices built into Qari, or Azure.
+
+### Oct 27, 2026 (tap change)
+- **Changed:** tapping a word now sets where reading starts. If the voice is reading, it carries on from that word; if paused, the word is marked and Play starts there. Double-tapping a word looks it up, or opens its highlight. The tour, tips and README now say so.
