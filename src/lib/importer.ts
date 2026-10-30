@@ -1,5 +1,7 @@
 import type { DocContent, DocMeta } from '../types'
 import { baseLang, detectLang } from './lang'
+import { getDoc, saveDoc } from './db'
+import { mapPosition } from './remap'
 import type { Extracted } from './extract/pdf'
 
 function uid() {
@@ -19,7 +21,7 @@ export function betterTitle(ex: Pick<Extracted, 'chapters'>, fileName: string) {
 }
 
 function finish(ex: Extracted, kind: DocMeta['kind'], fallbackTitle: string, extra: Partial<DocMeta> = {}): { meta: DocMeta; content: DocContent } {
-  const id = uid()
+  const id = extra.id || uid()
   const sample = ex.chapters
     .flatMap((c) => c.blocks)
     .join(' ')
@@ -61,13 +63,16 @@ export function isImage(file: File) {
 }
 
 /** PDFs, EPUBs, Word files, saved web pages and text files. Scanned PDFs throw NeedsOcrError (see importScannedPdf). */
-export async function importFile(file: File, onProgress?: Progress) {
+export async function importFile(file: File, onProgress?: Progress, onPreview?: (first: { meta: DocMeta; content: DocContent }) => void) {
   const name = nameOf(file)
   const ext = file.name.split('.').pop()?.toLowerCase()
   const data = await file.arrayBuffer()
   if (ext === 'pdf' || file.type === 'application/pdf') {
     const { extractPdf } = await import('./extract/pdf')
-    return finish(await extractPdf(data, onProgress), 'pdf', name)
+    // A long PDF opens with its first pages (same id), and the full book replaces them when it's ready.
+    const id = uid()
+    const preview = onPreview && ((part: Extracted) => onPreview(finish(part, 'pdf', name, { id, importing: true })))
+    return finish(await extractPdf(data, onProgress, preview), 'pdf', name, { id })
   }
   if (ext === 'epub' || file.type === 'application/epub+zip') {
     const { extractEpub } = await import('./extract/epub')
@@ -162,4 +167,18 @@ export function friendlyError(e: unknown): string {
   if (name === 'QuotaExceededError' || /quota/i.test(msg))
     return 'This device has run out of space for Qari. Remove some books (PDFs take the most room) and try again.'
   return msg
+}
+
+/**
+ * The rest of a long PDF has been read: replace the first-pages version, keeping what happened meanwhile
+ * (your place, a new title or folder). If you removed the book in the meantime, nothing is saved.
+ */
+export async function completeLongImport(meta: DocMeta, content: DocContent) {
+  const cur = await getDoc(meta.id)
+  if (!cur) return
+  const position = mapPosition(cur.content, content, cur.meta.position)
+  const { importing: _, ...rest } = { ...meta, title: cur.meta.title, author: cur.meta.author, folder: cur.meta.folder, openedAt: cur.meta.openedAt, positionAt: cur.meta.positionAt, position }
+  void _
+  await saveDoc({ ...rest, updatedAt: Date.now() }, content)
+  window.dispatchEvent(new CustomEvent('qari:docready', { detail: meta.id }))
 }

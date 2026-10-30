@@ -66,6 +66,17 @@ export default function Words() {
     }
   }
 
+  const [editing, setEditing] = useState<{ id: string; word: string; definition: string; sentence: string } | null>(null)
+  const saveEdit = async () => {
+    if (!editing) return
+    const w = (list || []).find((x) => x.id === editing.id)
+    if (!w) return setEditing(null)
+    const next: SavedWord = { ...w, word: editing.word.trim() || w.word, definition: editing.definition.trim(), sentence: editing.sentence.trim(), updatedAt: Date.now() }
+    await saveWord(next)
+    setList((l) => (l || []).map((x) => (x.id === w.id ? next : x)))
+    setEditing(null)
+  }
+
   const remove = async (id: string) => {
     await deleteWord(id)
     setList((l) => (l || []).filter((w) => w.id !== id))
@@ -115,29 +126,28 @@ export default function Words() {
           <div className="mt-4 rounded-xl border border-line bg-paper-2 px-4 py-3 text-sm" role="alert">
             {send.reason === 'phone' ? (
               <>
-                  <p className="font-semibold">Sending to Anki works from your computer.</p>
-                  <p className="mt-1 text-ink-2">
-                    It uses the AnkiConnect add-on in Anki on your computer. With sync on, the words you save here appear in Qari on your laptop; open them there and tap Send to
-                    Anki. They’re marked as sent, so nothing is added twice. To add them on this phone instead, use the download button to export a file and import it in
-                    AnkiMobile or AnkiDroid.
-                  </p>
+                <p className="font-semibold">Sending to Anki works from your computer.</p>
+                <p className="mt-1 text-ink-2">
+                  It uses the AnkiConnect add-on in Anki on your computer. With sync on, the words you save here appear in Qari on your laptop; open them there and tap Send to Anki. They’re marked as
+                  sent, so nothing is added twice. To add them on this phone instead, use the download button to export a file and import it in AnkiMobile or AnkiDroid.
+                </p>
               </>
             ) : send.reason === 'denied' ? (
               <>
-                  <p className="font-semibold">Anki said no to Qari.</p>
-                  <p className="mt-1 text-ink-2">Tap Send again and choose Yes when Anki asks whether to allow this site.</p>
+                <p className="font-semibold">Anki said no to Qari.</p>
+                <p className="mt-1 text-ink-2">Tap Send again and choose Yes when Anki asks whether to allow this site.</p>
               </>
             ) : (
               <>
-                  <p className="font-semibold">Qari couldn’t reach Anki on this computer.</p>
-                  <ol className="mt-1 list-decimal space-y-1 pl-5 text-ink-2">
-                    <li>
-                      Open Anki. Once only: Tools › Add-ons › Get Add-ons…, enter <span className="font-mono font-semibold text-ink">2055492159</span> (AnkiConnect) and restart Anki.
-                    </li>
-                    <li>Tap Send to Anki again. Anki asks whether to allow this site: choose Yes.</li>
-                    <li>If the browser asks to let this site reach devices on your local network, allow it.</li>
-                  </ol>
-                  <p className="mt-2 text-ink-3">Still stuck? Chrome and Edge work best for this. Or use the download button to export a file and import it in Anki.</p>
+                <p className="font-semibold">Qari couldn’t reach Anki on this computer.</p>
+                <ol className="mt-1 list-decimal space-y-1 pl-5 text-ink-2">
+                  <li>
+                    Open Anki. Once only: Tools › Add-ons › Get Add-ons…, enter <span className="font-mono font-semibold text-ink">2055492159</span> (AnkiConnect) and restart Anki.
+                  </li>
+                  <li>Tap Send to Anki again. Anki asks whether to allow this site: choose Yes.</li>
+                  <li>If the browser asks to let this site reach devices on your local network, allow it.</li>
+                </ol>
+                <p className="mt-2 text-ink-3">Still stuck? Chrome and Edge work best for this. Or use the download button to export a file and import it in Anki.</p>
               </>
             )}
             <button type="button" className="mt-2 text-ink-3 underline" onClick={() => setSend({ kind: 'idle' })}>
@@ -149,12 +159,7 @@ export default function Words() {
         {langs.length > 1 && (
           <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="Filter by language">
             {['all', ...langs].map((l) => (
-              <button
-                key={l}
-                type="button"
-                onClick={() => setLang(l)}
-                className={`h-9 rounded-full border px-3 text-sm ${lang === l ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
-              >
+              <button key={l} type="button" onClick={() => setLang(l)} className={`h-9 rounded-full border px-3 text-sm ${lang === l ? 'border-moss bg-wash font-semibold' : 'border-line'}`}>
                 {l === 'all' ? 'All' : LANG_NAMES[l] || l}
               </button>
             ))}
@@ -174,27 +179,86 @@ export default function Words() {
               const rtl = RTL_LANGS.has(w.lang)
               return (
                 <li key={w.id} className="group flex gap-2 py-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-baseline gap-x-3">
-                      <span dir={rtl ? 'rtl' : 'ltr'} lang={w.lang} className={rtl ? 'font-arabic text-2xl' : 'font-read text-xl'}>
-                        {w.word}
-                      </span>
-                      {w.lemma && <span className="text-sm text-ink-3">from {w.lemma}</span>}
-                      <span className="text-xs text-ink-3">{LANG_NAMES[w.lang] || w.lang}</span>
-                      {w.ankiAt && (
-                        <span className="inline-flex items-center gap-0.5 text-xs text-moss">
-                          <Icon name="check" size={12} /> In Anki
+                  {editing?.id === w.id ? (
+                    <form
+                      className="min-w-0 flex-1"
+                      onSubmit={(e) => {
+                        e.preventDefault()
+                        saveEdit()
+                      }}
+                    >
+                      <label className="block text-xs text-ink-3" htmlFor={'ew-' + w.id}>
+                        Word
+                      </label>
+                      <input
+                        id={'ew-' + w.id}
+                        value={editing.word}
+                        onChange={(e) => setEditing({ ...editing, word: e.target.value })}
+                        dir="auto"
+                        lang={w.lang}
+                        className={`mb-2 h-11 w-full rounded-xl border border-line bg-paper-2 px-3 ${rtl ? 'font-arabic text-xl' : 'font-read text-lg'}`}
+                      />
+                      <label className="block text-xs text-ink-3" htmlFor={'ed-' + w.id}>
+                        Meaning (what goes on the back of the card)
+                      </label>
+                      <textarea
+                        id={'ed-' + w.id}
+                        value={editing.definition}
+                        onChange={(e) => setEditing({ ...editing, definition: e.target.value })}
+                        rows={3}
+                        className="mb-2 w-full rounded-xl border border-line bg-paper-2 px-3 py-2 text-sm"
+                        autoFocus
+                      />
+                      <label className="block text-xs text-ink-3" htmlFor={'es-' + w.id}>
+                        Sentence
+                      </label>
+                      <textarea
+                        id={'es-' + w.id}
+                        value={editing.sentence}
+                        onChange={(e) => setEditing({ ...editing, sentence: e.target.value })}
+                        rows={2}
+                        dir="auto"
+                        className="mb-2 w-full rounded-xl border border-line bg-paper-2 px-3 py-2 font-read text-[0.95rem]"
+                      />
+                      {w.ankiAt && <p className="mb-2 text-xs text-ink-3">This card is already in Anki, so the change is saved here only. Edit the card in Anki too if you want it there.</p>}
+                      <div className="flex gap-2">
+                        <button type="submit" className="h-10 rounded-full bg-moss px-5 text-sm font-semibold text-moss-ink">
+                          Save
+                        </button>
+                        <button type="button" onClick={() => setEditing(null)} className="h-10 rounded-full border border-line px-4 text-sm">
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-baseline gap-x-3">
+                        <span dir={rtl ? 'rtl' : 'ltr'} lang={w.lang} className={rtl ? 'font-arabic text-2xl' : 'font-read text-xl'}>
+                          {w.word}
                         </span>
-                      )}
+                        {w.lemma && <span className="text-sm text-ink-3">from {w.lemma}</span>}
+                        <span className="text-xs text-ink-3">{LANG_NAMES[w.lang] || w.lang}</span>
+                        {w.ankiAt && (
+                          <span className="inline-flex items-center gap-0.5 text-xs text-moss">
+                            <Icon name="check" size={12} /> In Anki
+                          </span>
+                        )}
+                      </div>
+                      {w.definition && <p className="mt-1 whitespace-pre-line text-sm text-ink-2">{w.definition}</p>}
+                      <p dir="auto" className="mt-2 font-read text-[0.95rem] leading-relaxed text-ink-2">
+                        {w.sentence}
+                      </p>
+                      <p className="mt-1 truncate text-xs text-ink-3">{w.source}</p>
                     </div>
-                    {w.definition && <p className="mt-1 whitespace-pre-line text-sm text-ink-2">{w.definition}</p>}
-                    <p dir="auto" className="mt-2 font-read text-[0.95rem] leading-relaxed text-ink-2">
-                      {w.sentence}
-                    </p>
-                    <p className="mt-1 truncate text-xs text-ink-3">{w.source}</p>
-                  </div>
+                  )}
                   <div className="flex flex-col">
                     <IconButton icon="speaker" label={`Hear ${w.word}`} onClick={() => speakWord(w.word, w.lang, settings.voices[w.lang])} />
+                    <IconButton
+                      icon="pencil"
+                      label={`Edit ${w.word}`}
+                      onClick={() => setEditing({ id: w.id, word: w.word, definition: w.definition, sentence: w.sentence })}
+                      className="opacity-60 group-hover:opacity-100"
+                    />
                     <IconButton icon="trash" label={`Delete ${w.word}`} onClick={() => remove(w.id)} className="opacity-60 group-hover:opacity-100" />
                   </div>
                 </li>
@@ -207,8 +271,8 @@ export default function Words() {
           <details className="mt-6 rounded-xl border border-line px-4 py-3 text-sm">
             <summary className="cursor-pointer font-semibold">Anki decks</summary>
             <p className="mt-2 text-ink-3">
-              Each language’s words go to their own deck with a “Qari” note type, so your other decks aren’t touched. To put them into a deck you already have, type its exact
-              name (use :: for a subdeck).
+              Each language’s words go to their own deck with a “Qari” note type, so your other decks aren’t touched. To put them into a deck you already have, type its exact name (use :: for a
+              subdeck).
             </p>
             {langs.map((l) => (
               <label key={l} className="mt-2 flex items-center gap-3">

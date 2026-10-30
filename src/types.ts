@@ -32,6 +32,8 @@ export interface DocMeta {
   vocab?: { unique: number; fresh: number; at: number } // distinct words / new words, for languages you're learning
   updatedAt?: number // title, language, folder and other edits
   positionAt?: number // when the reading position last moved
+  importing?: boolean // a long PDF opened with its first pages; the rest is still being read
+  importFailed?: boolean // the rest of a long PDF couldn't be read
 }
 
 export interface DocContent {
@@ -80,6 +82,7 @@ export interface Settings {
   showHarakat: boolean
   readFont?: ReadFont
   bionic?: boolean // bold the start of each word
+  lineFocus?: boolean // dim everything but the line being read
   speedWpm?: number // speed reader, words per minute
   speedWarm?: { start: number; goal: number; pace: 'gentle' | 'steady' | 'quick' } // speed reader warm-up plan
   speedVoice?: boolean // speed reader: the voice reads along and sets the pace

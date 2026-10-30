@@ -254,32 +254,55 @@ export async function openPdf(data: ArrayBuffer) {
   return { doc: await task.promise, close: () => task.destroy() }
 }
 
-export async function extractPdf(data: ArrayBuffer, onProgress?: (p: number) => void): Promise<Extracted> {
+/** Pages read before a long PDF opens; the rest are read while you start. */
+const PREVIEW_PAGES = 15
+const LONG_PDF = 40
+
+/**
+ * Reads a PDF's text. For a long PDF, `onPreview` gets the first pages (cleaned up the same way) as soon as
+ * they're read, so the book can open while the rest comes in.
+ */
+export async function extractPdf(data: ArrayBuffer, onProgress?: (p: number) => void, onPreview?: (part: Extracted) => void): Promise<Extracted> {
   const task = pdfjs.getDocument({ data: new Uint8Array(data) })
   try {
-    return await extractFrom(task, onProgress)
+    return await extractFrom(task, onProgress, onPreview)
   } catch (e) {
     task.destroy().catch(() => {}) // a failed import mustn't leave the PDF worker holding the file
     throw e
   }
 }
 
-async function extractFrom(task: pdfjs.PDFDocumentLoadingTask, onProgress?: (p: number) => void): Promise<Extracted> {
+async function extractFrom(task: pdfjs.PDFDocumentLoadingTask, onProgress?: (p: number) => void, onPreview?: (part: Extracted) => void): Promise<Extracted> {
   const doc = await task.promise
   const pages: PageLines[] = []
+  const charsIn = (ps: PageLines[]) => ps.reduce((n, p) => n + p.lines.reduce((m, l) => m + l.text.length, 0), 0)
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i)
     pages.push(await pageLines(page))
     page.cleanup()
     onProgress?.(i / doc.numPages)
+    // Long book with real text: open with the first pages while the rest is read.
+    if (onPreview && i === PREVIEW_PAGES && doc.numPages > LONG_PDF && charsIn(pages) >= PREVIEW_PAGES * 200) {
+      try {
+        onPreview(await assemble(doc, pages.slice(), PREVIEW_PAGES))
+      } catch {
+        /* no preview; the full book still comes */
+      }
+    }
   }
 
-  const totalChars = pages.reduce((n, p) => n + p.lines.reduce((m, l) => m + l.text.length, 0), 0)
-  if (totalChars < doc.numPages * 20) {
+  if (charsIn(pages) < doc.numPages * 20) {
     const n = doc.numPages
     await task.destroy()
     throw new NeedsOcrError(n)
   }
+  const out = await assemble(doc, pages, doc.numPages)
+  await task.destroy()
+  return out
+}
+
+/** Turns pages of lines into chapters of paragraphs: headers, footers and footnotes out, split paragraphs joined. */
+async function assemble(doc: pdfjs.PDFDocumentProxy, pages: PageLines[], numPages: number): Promise<Extracted> {
 
   // Body text size = the size most characters are set in.
   const sizeChars = new Map<number, number>()
@@ -339,13 +362,13 @@ async function extractFrom(task: pdfjs.PDFDocumentLoadingTask, onProgress?: (p: 
       while (bs[t + 1]?.heading) t++
       return toChapter(bs[0].heading ? bs[t].text.slice(0, 120) : 'Beginning', bs)
     })
-    return finishMeta(doc, task, chapters)
+    return finishMeta(doc, chapters)
   }
   const bounds =
     outline.length > 0
       ? outline.map((o, i) => ({ title: o.title, from: i === 0 ? 0 : o.page, to: outline[i + 1]?.page ?? Infinity }))
-      : Array.from({ length: Math.ceil(doc.numPages / 10) }, (_, i) => ({
-          title: i * 10 === Math.min((i + 1) * 10, doc.numPages) - 1 ? `Page ${label(i * 10)}` : `Pages ${label(i * 10)}–${label(Math.min((i + 1) * 10, doc.numPages) - 1)}`,
+      : Array.from({ length: Math.ceil(numPages / 10) }, (_, i) => ({
+          title: i * 10 === Math.min((i + 1) * 10, numPages) - 1 ? `Page ${label(i * 10)}` : `Pages ${label(i * 10)}–${label(Math.min((i + 1) * 10, numPages) - 1)}`,
           from: i * 10,
           to: (i + 1) * 10,
         }))
@@ -357,10 +380,10 @@ async function extractFrom(task: pdfjs.PDFDocumentLoadingTask, onProgress?: (p: 
     })
     .filter((c) => c.blocks.length > 0)
 
-  return finishMeta(doc, task, chapters)
+  return finishMeta(doc, chapters)
 }
 
-async function finishMeta(doc: pdfjs.PDFDocumentProxy, task: pdfjs.PDFDocumentLoadingTask, chapters: Chapter[]): Promise<Extracted> {
+async function finishMeta(doc: pdfjs.PDFDocumentProxy, chapters: Chapter[]): Promise<Extracted> {
   let title: string | undefined
   let author: string | undefined
   let lang: string | undefined
@@ -373,7 +396,6 @@ async function finishMeta(doc: pdfjs.PDFDocumentProxy, task: pdfjs.PDFDocumentLo
   } catch {
     /* no metadata */
   }
-  await task.destroy()
   return { title, author, lang, chapters }
 }
 

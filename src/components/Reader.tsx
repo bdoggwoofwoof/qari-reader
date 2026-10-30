@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { go } from '../App'
 import { getDoc, getFile, listHighlights, onLocalChange, savePosition, saveHighlight, updateDocMeta } from '../lib/db'
 import { quoteLine } from '../lib/quotes'
+import { mapPosition } from '../lib/remap'
 import { getSyncCode } from '../lib/sync'
 import type { SearchHit } from '../lib/search'
 import BookPanel, { type PanelTab } from './BookPanel'
@@ -171,6 +172,91 @@ function bionicWord(word: string): React.ReactNode {
       <b className="bio">{letters.slice(0, cut).join('')}</b>
       {letters.slice(cut).join('')}
     </>
+  )
+}
+
+/** A skip button: tap for a sentence, hold for a paragraph. */
+function HoldButton({ icon, label, onTap, onHold }: { icon: string; label: string; onTap: () => void; onHold: () => void }) {
+  const timer = useRef<number | null>(null)
+  const held = useRef(false)
+  const clear = () => {
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = null
+  }
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onPointerDown={() => {
+        held.current = false
+        clear()
+        timer.current = window.setTimeout(() => {
+          held.current = true
+          navigator.vibrate?.(15)
+          onHold()
+        }, 450)
+      }}
+      onPointerUp={clear}
+      onPointerLeave={clear}
+      onPointerCancel={clear}
+      onContextMenu={(e) => e.preventDefault()}
+      onClick={() => {
+        if (held.current) held.current = false
+        else onTap()
+      }}
+      className="inline-flex h-11 w-11 shrink-0 touch-none select-none items-center justify-center rounded-full text-ink-2 [-webkit-touch-callout:none] hover:bg-paper-2 hover:text-ink"
+    >
+      <Icon name={icon} size={20} />
+    </button>
+  )
+}
+
+/**
+ * Line focus: a clear band over the line being read, with the rest of the page dimmed.
+ * Moves itself (no re-render) as the voice goes, the page scrolls or the window resizes.
+ */
+function LineFocus({ on }: { on: boolean }) {
+  const band = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!on) return
+    let frame = 0
+    let last = ''
+    const place = () => {
+      const el = band.current
+      const main = document.querySelector('main.prose-read')
+      const target = (document.querySelector('main.prose-read .w.now') || document.querySelector('main.prose-read .s.on .w')) as HTMLElement | null
+      if (el && main && target) {
+        const m = main.getBoundingClientRect()
+        // The word's first line box: a word that wraps uses its first line.
+        const r = target.getClientRects()[0] || target.getBoundingClientRect()
+        const pad = Math.max(4, r.height * 0.18)
+        const key = `${Math.round(r.top)}:${Math.round(r.height)}:${Math.round(m.left)}:${Math.round(m.width)}`
+        if (key !== last) {
+          last = key
+          el.style.opacity = '1'
+          el.style.transform = `translateY(${r.top - pad}px)`
+          el.style.height = `${r.height + pad * 2}px`
+          el.style.left = `${m.left + 8}px`
+          el.style.width = `${m.width - 16}px`
+        }
+      } else if (el && !target) {
+        el.style.opacity = '0'
+        last = ''
+      }
+      frame = requestAnimationFrame(place)
+    }
+    frame = requestAnimationFrame(place)
+    return () => cancelAnimationFrame(frame)
+  }, [on])
+  if (!on) return null
+  return (
+    <div
+      ref={band}
+      aria-hidden="true"
+      className="pointer-events-none fixed top-0 z-20 rounded-lg opacity-0 transition-[transform,height] duration-200 ease-out"
+      style={{ boxShadow: '0 0 0 200vmax color-mix(in srgb, var(--paper) 72%, transparent)' }}
+    />
   )
 }
 
@@ -872,6 +958,95 @@ export default function Reader({ id }: { id: string }) {
     [infoFor, nextPos, persist, speakAt],
   )
 
+  // ---------- A long PDF that opened with its first pages ----------
+  const [importP, setImportP] = useState<number | null>(null)
+  useEffect(() => {
+    const onProgress = (e: Event) => {
+      const d = (e as CustomEvent<{ id: string; p: number }>).detail
+      if (d.id === id) setImportP(d.p)
+    }
+    const onReady = async (e: Event) => {
+      if ((e as CustomEvent<string>).detail !== id) return
+      const d = await getDoc(id)
+      const old = contentRef.current
+      if (!d || !old) return
+      setImportP(null)
+      // Keep your place: find the same words in the complete book.
+      const { chapter: c, block: b, sent: s } = pos.current
+      const sentStart = infoFor(c, b)?.sents[s]?.start ?? 0
+      const at = mapPosition(old, d.content, { chapter: c, block: b, offset: lastWord.current ?? sentStart })
+      infoCache.current.clear()
+      contentRef.current = d.content
+      metaRef.current = d.meta
+      setContent(d.content)
+      setMeta(d.meta)
+      const info = infoFor(at.chapter, at.block)
+      const si = Math.max(0, info?.sents.findIndex((x) => at.offset >= x.start && at.offset < x.end) ?? 0)
+      pos.current = { chapter: at.chapter, block: at.block, sent: si }
+      lastWord.current = at.offset > (info?.sents[si]?.start ?? 0) ? at.offset : null
+      if (playingRef.current) speakAt(at.chapter, at.block, si, lastWord.current ?? undefined)
+      else {
+        setChapter(at.chapter)
+        setHl((h) => (h.sent < 0 ? h : { chapter: at.chapter, block: at.block, sent: si, word: -1 }))
+      }
+      if (d.meta.importFailed) setNotice('Qari couldn’t read the rest of this PDF. The pages read so far are here; try adding it again.')
+    }
+    window.addEventListener('qari:importprogress', onProgress)
+    window.addEventListener('qari:docready', onReady)
+    return () => {
+      window.removeEventListener('qari:importprogress', onProgress)
+      window.removeEventListener('qari:docready', onReady)
+    }
+  }, [id, infoFor, speakAt])
+
+  /** Hold the skip buttons (or Shift+arrow): a whole paragraph forward, or back to this paragraph's start, then the one before. */
+  const stepParagraph = useCallback(
+    (dir: 1 | -1) => {
+      const doc = contentRef.current
+      if (!doc) return
+      let { chapter: c, block: b, sent: s } = pos.current
+      const has = (cc: number, bb: number) => (infoFor(cc, bb)?.sents.length ?? 0) > 0
+      if (dir === 1) {
+        let nc = c
+        let nb = b + 1
+        while (nc < doc.chapters.length && !(nb < doc.chapters[nc].blocks.length && has(nc, nb))) {
+          if (nb < doc.chapters[nc].blocks.length) nb++
+          else {
+            nc++
+            nb = 0
+          }
+        }
+        if (nc >= doc.chapters.length) return
+        c = nc
+        b = nb
+        s = 0
+      } else if (s > 0 || lastWord.current !== null) s = 0
+      else {
+        let pc = c
+        let pb = b - 1
+        while (pc >= 0 && !(pb >= 0 && has(pc, pb))) {
+          if (pb >= 0) pb--
+          else if (--pc >= 0) pb = doc.chapters[pc].blocks.length - 1
+        }
+        if (pc < 0) return
+        c = pc
+        b = pb
+        s = 0
+      }
+      lastWord.current = null
+      repeated.current = false
+      pos.current = { chapter: c, block: b, sent: s }
+      userScrolledAt.current = 0
+      if (playingRef.current) speakAt(c, b, s)
+      else {
+        setChapter(c)
+        setHl({ chapter: c, block: b, sent: s, word: -1 })
+        persist()
+      }
+    },
+    [infoFor, persist, speakAt],
+  )
+
   const jumpTo = useCallback(
     (b: number, at?: number) => {
       const info = infoFor(chapter, b)
@@ -1065,13 +1240,13 @@ export default function Reader({ id }: { id: string }) {
       if (e.code === 'Space') {
         e.preventDefault()
         toggle()
-      } else if (e.key === 'ArrowRight') step(1)
-      else if (e.key === 'ArrowLeft') step(-1)
+      } else if (e.key === 'ArrowRight') (e.shiftKey ? stepParagraph : step)(1)
+      else if (e.key === 'ArrowLeft') (e.shiftKey ? stepParagraph : step)(-1)
       else if (e.key === 'r') repeatSentence()
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [toggle, step, repeatSentence, picked, tocOpen, settingsOpen, sleepOpen, speedOpen, viewPage, openHl])
+  }, [toggle, step, stepParagraph, repeatSentence, picked, tocOpen, settingsOpen, sleepOpen, speedOpen, viewPage, openHl])
 
   useEffect(() => {
     if (!('mediaSession' in navigator) || !meta) return
@@ -1354,6 +1529,7 @@ export default function Reader({ id }: { id: string }) {
         </div>
       )}
 
+      <LineFocus on={!!settings.lineFocus} />
       <main
         className="prose-read mx-auto max-w-[38rem] px-5 pt-6 pb-56"
         style={{ fontSize: settings.fontSize }}
@@ -1458,6 +1634,14 @@ export default function Reader({ id }: { id: string }) {
                 <Icon name="paste" size={16} />
               </button>
             </div>
+          </div>
+        )}
+        {meta.importing && !selection && (
+          <div className="mx-auto mb-2 flex max-w-md items-center gap-3 rounded-full border border-line bg-paper/95 px-4 py-1.5 text-xs text-ink-2 shadow-[0_4px_18px_rgb(0_0_0/0.08)]" role="status">
+            <span className="shrink-0">Reading the rest of this PDF{importP !== null ? ` · ${Math.round(importP * 100)}%` : '…'}</span>
+            <span className="h-1 flex-1 overflow-hidden rounded-full bg-line">
+              <span className="block h-full bg-moss transition-[width]" style={{ width: `${Math.round((importP ?? 0) * 100)}%` }} />
+            </span>
           </div>
         )}
         {follow === 'asking' && !selection && !playing && (
@@ -1569,7 +1753,7 @@ export default function Reader({ id }: { id: string }) {
               {chapterLangs.length > 1 && <span className="mr-1 text-[0.7rem] font-semibold uppercase text-ink-3">{curLang}</span>}
               {fmtRate(curRate)}×
             </button>
-            <IconButton icon="prev" label="Previous sentence" onClick={() => step(-1)} />
+            <HoldButton icon="prev" label="Previous sentence (hold for the paragraph)" onTap={() => step(-1)} onHold={() => stepParagraph(-1)} />
             <button
               type="button"
               onClick={toggle}
@@ -1579,7 +1763,7 @@ export default function Reader({ id }: { id: string }) {
             >
               <Icon name={playing ? 'pause' : 'play'} size={26} />
             </button>
-            <IconButton icon="next" label="Next sentence" onClick={() => step(1)} />
+            <HoldButton icon="next" label="Next sentence (hold for the next paragraph)" onTap={() => step(1)} onHold={() => stepParagraph(1)} />
             <IconButton icon="repeat" label="Repeat this sentence" onClick={repeatSentence} className={settings.afterSentence !== 'continue' ? 'text-moss' : ''} />
           </div>
         </div>
@@ -1980,6 +2164,12 @@ export default function Reader({ id }: { id: string }) {
             onChange={(v) => updateSettings({ bionic: v })}
             title="Bold word starts"
             hint="Bionic reading: the first part of each word is bold, so your eye has an anchor and moves faster. Not used for Arabic."
+          />
+          <Toggle
+            checked={!!settings.lineFocus}
+            onChange={(v) => updateSettings({ lineFocus: v })}
+            title="Line focus"
+            hint="Dims everything except the line being read, so it’s easier to keep your place when you’re tired. It follows the voice, or the word you tap."
           />
           <p className="-mt-2 text-sm text-ink-3">
             For speed reading, tap <span className="font-semibold text-ink-2">Speed read</span> above the play button: one word at a time, with a red letter to keep your eye still.

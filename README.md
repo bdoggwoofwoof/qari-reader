@@ -29,8 +29,8 @@ A personal replacement for Speechify: read PDFs and EPUBs aloud with word-by-wor
 
 - **Easier reading** – reading settings offer fonts made for dyslexia (OpenDyslexic, Lexend, Atkinson Hyperlegible) with their own spacing, and *Bold word starts* (bionic reading) for Latin-script text. **Speed read** (above the play button) shows one word at a time in a fixed spot with a red focus letter, 100–1000 words a minute, pausing longer at commas and full stops; closing it puts your place on the last word shown. Pause (tap anywhere) to look up the word on screen or any word in this sentence or the one before; *Read aloud* lets the voice read along and set the pace. *Warm up* starts slower and speeds up while you read (Gentle +25 a minute, Steady +25 every 30 s, Quick +50 every 30 s) until your goal; stopping it keeps the speed you reached. All of these work for every kind of book.
 
-Gestures: tap a word to read from there (or to mark where Play starts), double-tap it to look it up.
-Keyboard: Space = play/pause, ← / → = previous / next sentence, R = repeat sentence.
+Gestures: tap a word to read from there (or to mark where Play starts), double-tap it to look it up. Hold the skip buttons to jump a paragraph.
+Keyboard: Space = play/pause, ← / → = previous / next sentence, Shift+← / → = paragraph, R = repeat sentence.
 
 - **Voices** – three kinds, chosen per language (library › voices, or Reading settings › Voices):
   - *Qari voices* (free, built in): Piper neural voices that run on the device in a worker (`src/voices/piper-worker.js`, with ONNX Runtime and the espeak-ng phonemizer copied into `public/voices` at build time). Each voice downloads once from Hugging Face (rhasspy/piper-voices, about 60 MB) and is kept in the browser's cache, so it works offline. They play as audio, so reading keeps going with the screen locked, and the next two sentences are prepared ahead.
@@ -53,15 +53,12 @@ Push to a GitHub repo, import it in Vercel, framework preset **Vite**. For sync,
 
 ## Known limits
 
-- Voices are whatever the device has. Quality varies a lot: Apple “Enhanced/Premium” and Microsoft Edge “Natural” voices are good; some Android voices don’t report word timing, so the highlight is estimated from reading pace.
-- iPhone stops speech when the screen locks (the app keeps the screen awake while playing to avoid this).
-- Text recognition is good on clean print and weaker on handwriting, curved pages, poor light and large bold Arabic headings. Photos aren’t kept, so the original-page view is only for PDFs.
-- Arabic PDFs are read in the right order, including English words and numbers inside Arabic lines; PDFs with unusual layouts (several columns, tables) can still come out jumbled — EPUB, Word and scanned Arabic are the most reliable.
-- Web articles behind a login or paywall can’t be fetched; use Paste text.
-
-## Roadmap ideas
-
-2. Premium voices (pay-per-use API) as an option per language.
+- Device voices are whatever the device has; on iPhone, web apps only get Apple's basic voices. Qari voices (free, built in) or Azure voices fix this. With device voices, iPhone stops speech when the screen locks; Qari and Azure voices play as audio and keep going.
+- The word highlight for Qari and Azure voices is estimated from the audio's length, so it can run slightly ahead or behind.
+- Text recognition is good on clean print and weaker on handwriting, curved pages, poor light and large bold Arabic headings. Photos aren't kept, so the original-page view is only for PDFs.
+- Arabic PDFs are read in the right order, including English words and numbers inside Arabic lines; PDFs with unusual layouts (several columns, tables) can still come out jumbled. EPUB, Word and scanned Arabic are the most reliable.
+- Web articles behind a login or paywall can't be fetched; use Paste text.
+- Editing a saved word that's already in Anki changes it in Qari only.
 
 ## Status log
 
@@ -95,3 +92,13 @@ This is the central doc for Qari: each working session adds a dated entry here.
 - **Decisions:** Azure uses the REST endpoint, not the Speech SDK: it's simpler and more reliable on Vercel, and the highlight is estimated rather than exact. Qari voices offered are Piper "medium" quality. Kokoro (more natural English) wasn't added: it's heavy for phones, and Azure covers that need.
 - **Status:** tested in a headless browser with a stand-in Piper model and a mocked Azure (downloading, choosing, playing English with a Qari voice and Arabic with Azure, highlight moving, no device speech used). Not yet heard with real voices; the sandbox can't reach Hugging Face or Azure.
 - **Open:** Newt to try a Qari voice on his iPhone, including with the screen locked. For Azure: create a Speech F0 resource and add `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION` and `QARI_ACCESS_CODE` in Vercel (only `BLOB_READ_WRITE_TOKEN` is set now).
+
+### Oct 30, 2026
+- **Changed:**
+  - Hold the previous/next buttons (or Shift+arrow) to skip a whole paragraph. Holding back goes to the start of this paragraph, then the one before.
+  - *Line focus* (Reading settings › Easier reading) dims everything but the line being read. It follows the voice, or the word you tap.
+  - Saved words can be edited (word, meaning, sentence) before sending to Anki, and the edits sync.
+  - Long PDFs (over 40 pages) open after their first 15 pages; the rest is read in the background, with progress shown above the player. The complete book then replaces the first pages and keeps your place by finding the same words. Sync waits until the whole book is in. On a phone-speed test, a 292-page PDF opened in about 3 seconds instead of 11.
+  - Known limits brought up to date.
+- **Decisions:** the early-open version uses the same clean-up (headers, footers, page joins) on just the first pages. Highlights made during those first seconds aren't remapped (rare).
+- **Open:** waiting on Newt to hear a Qari voice on his iPhone and to set up the Azure and Claude keys; and to try Send to Anki with real Anki once.

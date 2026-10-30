@@ -210,6 +210,8 @@ async function syncOnce(k: SyncKeys): Promise<{ changedLocal: boolean }> {
     for (const id of new Set([...localDocs.keys(), ...Object.keys(remote.docs)])) {
       const l = localDocs.get(id)
       const r = remote.docs[id]
+      // A long PDF still being read: sync it once the whole book is in (content is uploaded only once).
+      if (l?.importing && !r) continue
       const gone = deletedDocs[id]
       if (gone && gone >= Math.max(l ? lastTouched(l) : 0, r ? lastTouched(r.meta) : 0)) {
         if (l) {

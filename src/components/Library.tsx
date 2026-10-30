@@ -7,9 +7,9 @@ import { startTour, useTour } from '../lib/tour'
 import VoiceCheck from './VoiceCheck'
 import SyncSheet from './SyncSheet'
 import { useSyncStatus } from '../lib/sync'
-import { findUrl, friendlyError, importArticle, importFile, importScannedPdf, importScans, importText, isImage } from '../lib/importer'
+import { completeLongImport, findUrl, friendlyError, importArticle, importFile, importScannedPdf, importScans, importText, isImage } from '../lib/importer'
 import { NeedsOcrError } from '../lib/extract/errors'
-import { LANG_NAMES, type DocMeta } from '../types'
+import { LANG_NAMES, type DocContent, type DocMeta } from '../types'
 import { Icon, IconButton, Sheet } from './ui'
 
 function touredThisSession() {
@@ -255,11 +255,44 @@ export default function Library({ joinCode, shared }: { joinCode?: string; share
     let added = 0
     for (const f of list.filter((x) => !isImage(x))) {
       setBusy({ name: f.name, p: 0 })
+      // One long PDF: open it as soon as its first pages are read; the rest arrives while you start reading.
+      let early: Promise<string> | null = null
+      let earlyId: string | null = null
       try {
-        const { meta, content } = await importFile(f, (p) => setBusy({ name: f.name, p }))
+        const onPreview =
+          list.length === 1
+            ? (first: { meta: DocMeta; content: DocContent }) => {
+                earlyId = first.meta.id
+                early = store(first.meta, first.content, f).then((id) => {
+                  setBusy(null)
+                  go('read/' + id)
+                  return id
+                })
+              }
+            : undefined
+        const { meta, content } = await importFile(
+          f,
+          (p) => {
+            if (earlyId) window.dispatchEvent(new CustomEvent('qari:importprogress', { detail: { id: earlyId, p } }))
+            else setBusy({ name: f.name, p })
+          },
+          onPreview,
+        )
+        if (early) {
+          await early
+          await completeLongImport(meta, content)
+          refresh()
+          return
+        }
         lastId = await store(meta, content, f)
         added++
       } catch (e) {
+        if (earlyId) {
+          // The first pages are open but the rest failed: keep what was read and say so in the book.
+          await updateDocMeta(earlyId, { importing: false, importFailed: true })
+          window.dispatchEvent(new CustomEvent('qari:docready', { detail: earlyId }))
+          return
+        }
         if (e instanceof NeedsOcrError) scannedPdfs.push(f)
         else fail(f.name, e)
       }
