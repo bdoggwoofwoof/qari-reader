@@ -112,3 +112,8 @@ This is the central doc for Qari: each working session adds a dated entry here.
 - **Changed:** nothing in the app. Wrote Stage 1 of the brand brief (claude.ai doc "Qari Reader: brand strategy"): product summary, review of the identity, positioning, tagline options, three creative directions.
 - **Recommended:** "The Marked Word": the reading highlight band becomes the symbol and graphic language; palette, Literata and the قارئ wordmark stay. Brand line: "Every word, heard and understood."
 - **Open:** Newt to pick a direction and answer six questions in the doc before Stage 2 (visual exploration).
+
+### Nov 2, 2026 (brand strategy, Stage 1 revised)
+- **Changed:** rewrote the brand doc for the revised brief. Stage 1 is now positioning, audience and use cases, personality and values, core promise, tagline, and should/shouldn't feel like. The three directions moved to Stage 2 (Modern Book, Quiet Study, Reader's Instrument).
+- **Recommended:** keep "Read closely. Listen deeply." as the lead line; test "Read closely. Listen closely." in Stage 2 lockups; "Every word, heard and understood." as a supporting line.
+- **Open:** Newt to answer four questions (tagline, icon meaning, first audience, whether the yellow is fixed) before Stage 2.
