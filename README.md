@@ -102,3 +102,8 @@ This is the central doc for Qari: each working session adds a dated entry here.
   - Known limits brought up to date.
 - **Decisions:** the early-open version uses the same clean-up (headers, footers, page joins) on just the first pages. Highlights made during those first seconds aren't remapped (rare).
 - **Open:** waiting on Newt to hear a Qari voice on his iPhone and to set up the Azure and Claude keys; and to try Send to Anki with real Anki once.
+
+### Nov 2, 2026 (design audit)
+- **Changed:** nothing in the app. Wrote a design and UX audit for an outside reviewer (claude.ai doc "Qari Reader: design and UX audit"): tokens, screen-by-screen notes with measured sizes, 15 ranked problems, what to keep.
+- **Findings in short:** the reading surface is the strength; the chrome isn't. Top fixes: regroup reading settings, make the player's Speed read and Sleep real 44px buttons, define a small size/radius/shadow token set and a 3:1 border color, lead the library with the book in progress and shrink the storage notice, and restructure the lookup sheet (meaning first, Save as primary).
+- **Open:** waiting on the outside reviewer before redesigning anything.
