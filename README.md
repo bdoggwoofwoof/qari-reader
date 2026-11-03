@@ -107,3 +107,8 @@ This is the central doc for Qari: each working session adds a dated entry here.
 - **Changed:** nothing in the app. Wrote a design and UX audit for an outside reviewer (claude.ai doc "Qari Reader: design and UX audit"): tokens, screen-by-screen notes with measured sizes, 15 ranked problems, what to keep.
 - **Findings in short:** the reading surface is the strength; the chrome isn't. Top fixes: regroup reading settings, make the player's Speed read and Sleep real 44px buttons, define a small size/radius/shadow token set and a 3:1 border color, lead the library with the book in progress and shrink the storage notice, and restructure the lookup sheet (meaning first, Save as primary).
 - **Open:** waiting on the outside reviewer before redesigning anything.
+
+### Nov 2, 2026 (brand strategy, Stage 1)
+- **Changed:** nothing in the app. Wrote Stage 1 of the brand brief (claude.ai doc "Qari Reader: brand strategy"): product summary, review of the identity, positioning, tagline options, three creative directions.
+- **Recommended:** "The Marked Word": the reading highlight band becomes the symbol and graphic language; palette, Literata and the قارئ wordmark stay. Brand line: "Every word, heard and understood."
+- **Open:** Newt to pick a direction and answer six questions in the doc before Stage 2 (visual exploration).
