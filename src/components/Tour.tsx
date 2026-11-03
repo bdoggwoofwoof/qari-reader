@@ -4,6 +4,7 @@ import { getDoc, saveDoc } from '../lib/db'
 import { importText } from '../lib/importer'
 import { useSettings } from '../lib/settings'
 import { endTour, setTourStep, useTour } from '../lib/tour'
+import { Button } from './ui'
 
 type Target = string | (() => Element | null)
 interface Step {
@@ -18,11 +19,36 @@ const words = () => document.querySelectorAll('main.prose-read p')[1] || documen
 const STEPS: Step[] = [
   { where: 'library', title: 'Welcome to Qari', body: 'Qari reads your books, articles and class readings aloud, and lets you look up any word as you listen. Five quick things to know.' },
   { where: 'library', target: '[data-tour=add]', title: 'Add something to read', body: 'PDFs, EPUBs, Word files, web links, pasted text, or photos of printed pages.' },
-  { where: 'library', target: '[data-tour=menu]', title: 'Sync, voices and backup', body: 'Keep your phone and laptop in step (encrypted), check which languages this device can read aloud, switch to dark mode, or download a backup.' },
-  { where: 'reader', target: words, title: 'Tap any word', body: 'Tap a word to start reading from there. Double-tap it to see what it means: reading pauses and carries on when you close it. Select a few words to highlight, add a note or translate.' },
-  { where: 'reader', target: '[data-tour=play]', title: 'Play, speed and skip', body: 'The sentence being read is tinted and each word lights up as it’s spoken. Tap the speed on the left to change it; each language keeps its own.' },
-  { where: 'reader', target: '[data-tour=speedread]', title: 'Speed read', body: 'One word at a time in the same spot, with a red letter to keep your eye still. Set how many words a minute; when you close it, your place is where you stopped.' },
-  { where: 'reader', target: '[aria-label="Reading settings"]', title: 'Everything else is up here', body: 'Search, contents and notes, and reading settings (voices, text size, Arabic font, and dyslexia-friendly fonts and bold word starts). Take this tour again from the ⋯ menu in your library.' },
+  {
+    where: 'library',
+    target: '[data-tour=menu]',
+    title: 'Sync, voices and backup',
+    body: 'Keep your phone and laptop in step (encrypted), check which languages this device can read aloud, switch to dark mode, or download a backup.',
+  },
+  {
+    where: 'reader',
+    target: words,
+    title: 'Tap any word',
+    body: 'Tap a word to start reading from there. Double-tap it to see what it means: reading pauses and carries on when you close it. Select a few words to highlight, add a note or translate.',
+  },
+  {
+    where: 'reader',
+    target: '[data-tour=play]',
+    title: 'Play, speed and skip',
+    body: 'The sentence being read is tinted and each word lights up as it’s spoken. Tap the speed on the left to change it; each language keeps its own.',
+  },
+  {
+    where: 'reader',
+    target: '[data-tour=speedread]',
+    title: 'Speed read',
+    body: 'One word at a time in the same spot, with a red letter to keep your eye still. Set how many words a minute; when you close it, your place is where you stopped.',
+  },
+  {
+    where: 'reader',
+    target: '[aria-label="Reading settings"]',
+    title: 'Everything else is up here',
+    body: 'Search, contents and notes, and reading settings (voices, text size, Arabic font, and dyslexia-friendly fonts and bold word starts). Take this tour again from the ⋯ menu in your library.',
+  },
 ]
 
 const SAMPLE = `This is a short sample so you can try Qari. Press play and listen: the sentence being read is tinted, and each word lights up as it is spoken.
@@ -175,34 +201,25 @@ export default function Tour() {
         </div>
       )}
       {!waiting && (
-        <div
-          ref={card}
-          tabIndex={-1}
-          className="sheet-in absolute rounded-2xl bg-paper p-4 text-ink shadow-[0_8px_30px_rgb(0_0_0/0.3)] outline-none"
-          style={{ ...pos, width: w }}
-        >
+        <div ref={card} tabIndex={-1} className="sheet-in absolute rounded-2xl bg-paper p-4 text-ink shadow-sheet outline-none" style={{ ...pos, width: w }}>
           <div className="flex items-baseline justify-between gap-3">
             <h2 className="font-semibold">{s.title}</h2>
             <span className="shrink-0 text-xs tabular-nums text-ink-3">
               {step + 1} of {STEPS.length}
             </span>
           </div>
-          <p className="mt-1.5 text-[0.95rem] leading-relaxed text-ink-2">{s.body}</p>
+          <p className="mt-1.5 text-base leading-relaxed text-ink-2">{s.body}</p>
           <div className="mt-4 flex items-center gap-2">
             {!last && (
-              <button type="button" onClick={finish} className="mr-auto h-10 text-sm text-ink-3 underline-offset-2 hover:underline">
+              <Button kind="quiet" onClick={finish} className="-ml-3 mr-auto text-ink-3">
                 Skip tour
-              </button>
+              </Button>
             )}
             {last && <span className="mr-auto" />}
-            {step > 0 && (
-              <button type="button" onClick={() => move(-1)} className="h-10 rounded-full border border-line px-4 text-sm">
-                Back
-              </button>
-            )}
-            <button type="button" onClick={() => move(1)} className="h-10 rounded-full bg-moss px-5 text-sm font-semibold text-moss-ink hover:opacity-90">
+            {step > 0 && <Button onClick={() => move(-1)}>Back</Button>}
+            <Button kind="primary" onClick={() => move(1)}>
               {last ? 'Done' : STEPS[step + 1]?.where === 'reader' && s.where === 'library' ? 'Open a sample' : step === 0 ? 'Show me' : 'Next'}
-            </button>
+            </Button>
           </div>
         </div>
       )}

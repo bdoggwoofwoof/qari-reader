@@ -5,7 +5,7 @@ import { translate, type Translation } from '../lib/translate'
 import { speakWord } from '../lib/tts'
 import { isKnown, isLearning, setKnown, useVocab, vocabKey } from '../lib/vocab'
 import { LANG_NAMES, RTL_LANGS, type Lang } from '../types'
-import { Icon, Sheet } from './ui'
+import { Button, Icon, Sheet } from './ui'
 
 export interface Picked {
   word: string // a word, or a phrase when several words were selected
@@ -20,7 +20,7 @@ type TState = { status: 'idle' } | { status: 'loading' } | { status: 'done'; t: 
 function TranslationBox({ label, state, rtl }: { label: string; state: TState; rtl?: boolean }) {
   if (state.status === 'idle') return null
   return (
-    <div className="mt-3 rounded-xl border border-line px-4 py-3" aria-live="polite">
+    <div className="my-3 rounded-xl border border-line px-4 py-3" aria-live="polite">
       <div className="mb-1 flex items-baseline justify-between gap-3 text-xs text-ink-3">
         <span>{label}</span>
         {state.status === 'done' && <span>{state.t.engine === 'claude' ? 'Claude' : 'MyMemory (machine translation)'}</span>}
@@ -29,7 +29,7 @@ function TranslationBox({ label, state, rtl }: { label: string; state: TState; r
       {state.status === 'error' && <p className="text-sm text-danger">{state.message}</p>}
       {state.status === 'done' && (
         <>
-          <p className="font-read text-[1.02rem] leading-snug" dir={rtl ? 'rtl' : 'auto'}>
+          <p className="font-read text-base leading-snug" dir={rtl ? 'rtl' : 'auto'}>
             {state.t.text}
           </p>
           {state.t.notes && <p className="mt-1.5 text-sm text-ink-2">{state.t.notes}</p>}
@@ -126,7 +126,13 @@ export default function LookupSheet({
     const def =
       result?.entries
         .slice(0, 3)
-        .map((e) => `${e.language && e.language !== LANG_NAMES[lang] ? e.language.replace(/ Arabic$/, '') + ' ' : ''}${e.partOfSpeech}${e.word !== picked.word ? ` (${e.word})` : ''}: ${e.senses.slice(0, 2).map((s) => s.text).join('; ')}`)
+        .map(
+          (e) =>
+            `${e.language && e.language !== LANG_NAMES[lang] ? e.language.replace(/ Arabic$/, '') + ' ' : ''}${e.partOfSpeech}${e.word !== picked.word ? ` (${e.word})` : ''}: ${e.senses
+              .slice(0, 2)
+              .map((s) => s.text)
+              .join('; ')}`,
+        )
         .join('\n') || (tPhrase.status === 'done' ? tPhrase.t.text + (tPhrase.t.notes ? `\n${tPhrase.t.notes}` : '') : '')
     const now = Date.now()
     await saveWord({
@@ -158,54 +164,20 @@ export default function LookupSheet({
         </span>
       }
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => speakWord(picked.word, lang, voiceURI)}
-          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line px-3 text-sm hover:bg-paper-2"
-        >
-          <Icon name="speaker" size={17} /> Hear it
-        </button>
-        <button
-          type="button"
-          onClick={save}
-          disabled={isSaved}
-          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line px-3 text-sm hover:bg-paper-2 disabled:border-moss disabled:text-moss"
-        >
-          <Icon name={isSaved ? 'bookmarkFilled' : 'bookmark'} size={17} /> {isSaved ? 'Saved' : phrase ? 'Save phrase' : 'Save word'}
-        </button>
-        {learning && !phrase && !isSaved && (
-          <button
-            type="button"
-            onClick={() => setKnown(picked.lang, [picked.word], !known)}
-            aria-pressed={!!known}
-            className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-sm ${known ? 'border-moss bg-wash text-moss' : 'border-line hover:bg-paper-2'}`}
-          >
-            <Icon name={known ? 'check' : 'plus'} size={16} /> {known ? 'Known' : 'I know this'}
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => onReadFromHere(picked)}
-          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line px-3 text-sm hover:bg-paper-2"
-        >
-          <Icon name="play" size={15} /> Read from here
-        </button>
-        <label className="ml-auto inline-flex items-center gap-1 text-sm text-ink-3">
-          <span className="sr-only">{phrase ? 'Phrase language' : 'Word language'}</span>
-          <select value={lang} onChange={(e) => setLang(e.target.value)} className="rounded-md bg-transparent py-1 text-ink-2">
-            {Object.entries(LANG_NAMES).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <label className="-mt-1 mb-3 flex items-center gap-2 text-sm text-ink-3">
+        {phrase ? 'Phrase in' : 'Word in'}
+        <select value={lang} onChange={(e) => setLang(e.target.value)} className="h-9 rounded-xl border border-edge bg-paper px-2 text-ink-2">
+          {Object.entries(LANG_NAMES).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
+      </label>
 
       {canTranslate && <TranslationBox label={phrase ? 'Translation' : 'Meaning in this sentence'} state={tPhrase} />}
 
-      <div className="mt-4 min-h-16">
+      <div className="min-h-16">
         {state === 'loading' && <p className="text-ink-3">Looking it up…</p>}
         {state === 'offline' && <p className="text-ink-2">You’re offline, so the dictionary can’t be reached. You can still save it with its sentence.</p>}
         {state === 'done' && result && result.entries.length === 0 && (
@@ -218,9 +190,7 @@ export default function LookupSheet({
           result?.entries.slice(0, 5).map((e, i) => (
             <div key={i} className="mb-4">
               <div className="text-sm font-semibold text-moss">
-                {e.language && e.language !== LANG_NAMES[lang] && (
-                  <span className="mr-2 rounded-full bg-wash px-2 py-0.5 text-xs font-semibold text-ink">{e.language.replace(/ Arabic$/, '')}</span>
-                )}
+                {e.language && e.language !== LANG_NAMES[lang] && <span className="mr-2 rounded-full bg-wash px-2 py-0.5 text-xs font-semibold text-ink">{e.language.replace(/ Arabic$/, '')}</span>}
                 {e.partOfSpeech}
                 {e.word !== picked.word && (
                   <span className="ml-2 font-normal text-ink-3" dir="auto">
@@ -228,7 +198,7 @@ export default function LookupSheet({
                   </span>
                 )}
               </div>
-              <ol className="mt-1 list-decimal space-y-1 pl-5 font-read text-[1.02rem] leading-snug marker:text-ink-3">
+              <ol className="mt-1 list-decimal space-y-1 pl-5 font-read text-base leading-snug marker:text-ink-3">
                 {e.senses.map((s, j) => (
                   <li key={j} dir="auto">
                     {s.text}
@@ -238,28 +208,37 @@ export default function LookupSheet({
             </div>
           ))}
         {canTranslate && !phrase && result?.entries.length && tPhrase.status === 'idle' ? (
-          <button
-            type="button"
-            onClick={() => run(setTPhrase, picked.word, picked.sentence)}
-            className="-mt-1 mb-2 text-sm text-moss underline-offset-2 hover:underline"
-          >
+          <button type="button" onClick={() => run(setTPhrase, picked.word, picked.sentence)} className="-mt-1 mb-2 text-sm text-moss underline-offset-2 hover:underline">
             Meaning in this sentence
           </button>
         ) : null}
       </div>
 
-      <blockquote dir="auto" className="rounded-xl bg-paper-2 px-4 py-3 font-read text-[0.95rem] leading-relaxed text-ink-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Button kind={isSaved ? 'secondary' : 'primary'} icon={isSaved ? 'bookmarkFilled' : 'bookmark'} onClick={save} disabled={isSaved} className={isSaved ? 'text-moss disabled:opacity-100' : ''}>
+          {isSaved ? 'Saved' : phrase ? 'Save phrase' : 'Save word'}
+        </Button>
+        <Button icon="speaker" onClick={() => speakWord(picked.word, lang, voiceURI)}>
+          Hear it
+        </Button>
+        {learning && !phrase && !isSaved && (
+          <Button icon={known ? 'check' : 'plus'} onClick={() => setKnown(picked.lang, [picked.word], !known)} aria-pressed={!!known} className={known ? 'border-moss bg-wash text-moss' : ''}>
+            {known ? 'Known' : 'I know this'}
+          </Button>
+        )}
+        <Button kind="quiet" icon="play" onClick={() => onReadFromHere(picked)}>
+          Read from here
+        </Button>
+      </div>
+
+      <blockquote dir="auto" className="rounded-xl bg-paper-2 px-4 py-3 font-read text-base leading-relaxed text-ink-2">
         {picked.sentence}
       </blockquote>
       {canTranslate &&
         (tSentence.status === 'idle' ? (
-          <button
-            type="button"
-            onClick={() => run(setTSentence, picked.sentence)}
-            className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-full border border-line px-3 text-sm hover:bg-paper-2"
-          >
-            <Icon name="translate" size={16} /> Translate sentence
-          </button>
+          <Button compact icon="translate" onClick={() => run(setTSentence, picked.sentence)} className="mt-2">
+            Translate sentence
+          </Button>
         ) : (
           <TranslationBox label="Sentence" state={tSentence} />
         ))}
@@ -288,7 +267,11 @@ export default function LookupSheet({
       </div>
       {copied && (
         <p className="mt-2 text-sm text-ink-2" aria-live="polite">
-          Copied <span lang="ar" dir="rtl" className="font-semibold">{copied}</span> — paste it into Lughatuna’s search box.
+          Copied{' '}
+          <span lang="ar" dir="rtl" className="font-semibold">
+            {copied}
+          </span>{' '}
+          — paste it into Lughatuna’s search box.
         </p>
       )}
     </Sheet>

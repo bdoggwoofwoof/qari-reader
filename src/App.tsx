@@ -3,6 +3,7 @@ import Library, { type Shared } from './components/Library'
 import Reader from './components/Reader'
 import Words from './components/Words'
 import Tour from './components/Tour'
+import { ConfirmHost } from './components/ui'
 import { useSettings } from './lib/settings'
 import { ARABIC_FONTS, READ_FONTS } from './types'
 
@@ -72,6 +73,7 @@ export default function App() {
     <>
       {screen}
       <Tour />
+      <ConfirmHost />
     </>
   )
 }

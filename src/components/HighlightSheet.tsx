@@ -51,7 +51,7 @@ export default function HighlightSheet({
 
   return (
     <Sheet open onClose={close} title={pageRef(highlight) ? `Highlight · ${pageRef(highlight)}` : 'Highlight'} wide>
-      <blockquote dir="auto" className="border-l-4 border-mark pl-3 font-read text-[1.02rem] leading-relaxed">
+      <blockquote dir="auto" className="border-l-4 border-mark pl-3 font-read text-base leading-relaxed">
         {highlight.text}
       </blockquote>
       <label htmlFor="hl-note" className="mt-4 mb-1 block text-sm font-semibold">
@@ -64,7 +64,7 @@ export default function HighlightSheet({
         onBlur={save}
         dir="auto"
         placeholder="Why this matters, a question for class, how it connects…"
-        className="h-28 w-full resize-y rounded-xl border border-line bg-paper-2 p-3 text-[0.95rem] outline-none focus:border-moss"
+        className="h-28 w-full resize-y rounded-xl border border-line bg-paper-2 p-3 text-base outline-none focus:border-moss"
       />
       <div className="mt-3 mb-2 flex flex-wrap gap-2">
         <button type="button" onClick={copy} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line px-3 text-sm hover:bg-paper-2">

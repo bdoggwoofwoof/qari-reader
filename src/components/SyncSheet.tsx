@@ -2,7 +2,7 @@ import qrcode from 'qrcode-generator'
 import { useEffect, useMemo, useState } from 'react'
 import { getSyncCode, startSync, stopSync, syncNow, useSyncStatus } from '../lib/sync'
 import { formatCode, newSyncCode, normalizeCode } from '../lib/syncCrypto'
-import { Icon, Sheet } from './ui'
+import { ask, Button, Icon, Sheet } from './ui'
 
 function ago(t?: number) {
   if (!t) return 'not yet'
@@ -63,8 +63,8 @@ export default function SyncSheet({ open, onClose, joinCode }: { open: boolean; 
     if (location.hash.startsWith('#/sync')) history.replaceState(null, '', location.pathname + '#/')
   }
 
-  const turnOff = () => {
-    if (!confirm('Stop syncing on this device? Your books stay here, and your other devices keep their copies.')) return
+  const turnOff = async () => {
+    if (!(await ask({ title: 'Stop syncing on this device?', body: 'Your books stay here, and your other devices keep their copies.', yes: 'Stop syncing' }))) return
     stopSync()
     setCode(null)
   }
@@ -93,13 +93,12 @@ export default function SyncSheet({ open, onClose, joinCode }: { open: boolean; 
       {!code ? (
         <>
           <p className="text-ink-2">
-            Keep your books, reading place, saved words and settings the same on your phone and laptop. Everything is encrypted on this device before it’s uploaded, so only your
-            devices can read it.
+            Keep your books, reading place, saved words and settings the same on your phone and laptop. Everything is encrypted on this device before it’s uploaded, so only your devices can read it.
           </p>
           {joinCode ? null : (
-            <button type="button" onClick={turnOn} className="mt-4 h-11 w-full rounded-full bg-moss font-semibold text-moss-ink">
+            <Button kind="primary" onClick={turnOn} className="mt-4 w-full">
               Turn on sync
-            </button>
+            </Button>
           )}
           <form
             className="mt-6"
@@ -149,7 +148,7 @@ export default function SyncSheet({ open, onClose, joinCode }: { open: boolean; 
             <div className="w-44 shrink-0 rounded-xl bg-white p-2" aria-label="QR code with your sync link" role="img" dangerouslySetInnerHTML={{ __html: qr }} />
             <div className="min-w-0 flex-1 text-center sm:text-left">
               <p className="text-sm text-ink-3">Or type this code on the other device:</p>
-              <p className="mt-1 font-mono text-[0.95rem] leading-relaxed font-semibold tracking-wide select-all">
+              <p className="mt-1 font-mono text-base leading-relaxed font-semibold tracking-wide select-all">
                 {formatCode(code).slice(0, 19)}
                 <br />
                 {formatCode(code).slice(20)}

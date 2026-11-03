@@ -5,7 +5,7 @@ import { deleteWord, listWords, saveWord } from '../lib/db'
 import { speakWord } from '../lib/tts'
 import { useSettings } from '../lib/settings'
 import { LANG_NAMES, RTL_LANGS, type SavedWord } from '../types'
-import { Icon, IconButton } from './ui'
+import { ActionList, ActionRow, Button, Icon, IconButton, Sheet } from './ui'
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 const cell = (s: string) => s.replace(/[\t\r]/g, ' ').replace(/\n/g, '<br>')
@@ -28,6 +28,8 @@ export default function Words() {
   const [list, setList] = useState<SavedWord[] | null>(null)
   const [lang, setLang] = useState<string>('all')
   const [send, setSend] = useState<SendState>({ kind: 'idle' })
+  const [ankiOpen, setAnkiOpen] = useState(false)
+  const mobile = onPhone()
   const [settings, updateSettings] = useSettings()
 
   const load = () => listWords().then(setList)
@@ -87,24 +89,62 @@ export default function Words() {
       <header className="sticky top-0 z-30 border-b border-line/70 bg-paper/90 pt-[env(safe-area-inset-top)] backdrop-blur">
         <div className="mx-auto flex h-14 max-w-3xl items-center gap-1 px-2">
           <IconButton icon="back" label="Back" onClick={() => (history.length > 1 ? history.back() : go(''))} />
-          <h1 className="flex-1 text-[0.95rem] font-semibold">Saved words</h1>
+          <h1 className="flex-1 text-base font-semibold">Saved words</h1>
           {!!list?.length && (
             <>
-              <IconButton icon="download" label="Export a file for Anki" onClick={exportAnki} disabled={!shown.length} />
-              <button
-                type="button"
-                onClick={sendNow}
-                disabled={!unsent.length || send.kind === 'sending'}
-                className="mr-1 inline-flex h-10 items-center gap-1.5 rounded-full bg-moss px-4 text-sm font-semibold text-moss-ink hover:opacity-90 disabled:opacity-40"
-              >
-                <Icon name="anki" size={17} /> {send.kind === 'sending' ? 'Sending…' : unsent.length ? `Send ${unsent.length} to Anki` : 'All in Anki'}
-              </button>
+              <Button icon="anki" onClick={() => setAnkiOpen(true)} className="mr-1" disabled={send.kind === 'sending'}>
+                {send.kind === 'sending' ? 'Sending…' : 'Anki'}
+              </Button>
             </>
           )}
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 pb-16 sm:px-6">
+      <Sheet open={ankiOpen} onClose={() => setAnkiOpen(false)} title="Anki">
+        <ActionList>
+          <ActionRow
+            icon="anki"
+            title={unsent.length ? `Send ${unsent.length} new ${unsent.length === 1 ? 'word' : 'words'} to Anki` : 'All your words are in Anki'}
+            note={mobile ? 'Works from Qari on your computer, with Anki open' : 'Adds them straight into Anki on this computer'}
+            onClick={() => {
+              setAnkiOpen(false)
+              if (unsent.length) sendNow()
+            }}
+          />
+          <ActionRow
+            icon="download"
+            title="Download a file for Anki"
+            note="Import it in Anki, AnkiMobile or AnkiDroid"
+            onClick={() => {
+              setAnkiOpen(false)
+              exportAnki()
+            }}
+          />
+        </ActionList>
+        {langs.length > 0 && (
+          <section className="border-t border-line pt-3 pb-2 text-sm">
+            <h3 className="font-semibold">Decks</h3>
+            <p className="mt-2 text-ink-3">
+              Each language’s words go to their own deck with a “Qari” note type, so your other decks aren’t touched. To put them into a deck you already have, type its exact name (use :: for a
+              subdeck).
+            </p>
+            {langs.map((l) => (
+              <label key={l} className="mt-2 flex items-center gap-3">
+                <span className="w-20 shrink-0 text-ink-2">{LANG_NAMES[l] || l}</span>
+                <input
+                  value={settings.ankiDecks[l] ?? ''}
+                  placeholder={defaultDeck(l)}
+                  onChange={(e) => updateSettings({ ankiDecks: { ...settings.ankiDecks, [l]: e.target.value } })}
+                  dir="auto"
+                  className="h-11 min-w-0 flex-1 rounded-xl border border-edge bg-paper-2 px-3 outline-none focus:border-moss"
+                />
+              </label>
+            ))}
+          </section>
+        )}
+      </Sheet>
+
+      <main className="mx-auto max-w-3xl px-5 pb-16 sm:px-6">
         {send.kind === 'done' && (
           <div className="mt-4 flex items-start gap-3 rounded-xl border border-moss/50 bg-wash px-4 py-3 text-sm" role="status">
             <Icon name="check" size={18} className="mt-0.5 shrink-0 text-moss" />
@@ -218,14 +258,14 @@ export default function Words() {
                         onChange={(e) => setEditing({ ...editing, sentence: e.target.value })}
                         rows={2}
                         dir="auto"
-                        className="mb-2 w-full rounded-xl border border-line bg-paper-2 px-3 py-2 font-read text-[0.95rem]"
+                        className="mb-2 w-full rounded-xl border border-line bg-paper-2 px-3 py-2 font-read text-base"
                       />
                       {w.ankiAt && <p className="mb-2 text-xs text-ink-3">This card is already in Anki, so the change is saved here only. Edit the card in Anki too if you want it there.</p>}
                       <div className="flex gap-2">
-                        <button type="submit" className="h-10 rounded-full bg-moss px-5 text-sm font-semibold text-moss-ink">
+                        <Button kind="primary" type="submit">
                           Save
-                        </button>
-                        <button type="button" onClick={() => setEditing(null)} className="h-10 rounded-full border border-line px-4 text-sm">
+                        </Button>
+                        <button type="button" onClick={() => setEditing(null)} className="h-11 rounded-full border border-line px-4 text-sm">
                           Cancel
                         </button>
                       </div>
@@ -245,7 +285,7 @@ export default function Words() {
                         )}
                       </div>
                       {w.definition && <p className="mt-1 whitespace-pre-line text-sm text-ink-2">{w.definition}</p>}
-                      <p dir="auto" className="mt-2 font-read text-[0.95rem] leading-relaxed text-ink-2">
+                      <p dir="auto" className="mt-2 font-read text-base leading-relaxed text-ink-2">
                         {w.sentence}
                       </p>
                       <p className="mt-1 truncate text-xs text-ink-3">{w.source}</p>
@@ -265,28 +305,6 @@ export default function Words() {
               )
             })}
           </ul>
-        )}
-
-        {langs.length > 0 && (
-          <details className="mt-6 rounded-xl border border-line px-4 py-3 text-sm">
-            <summary className="cursor-pointer font-semibold">Anki decks</summary>
-            <p className="mt-2 text-ink-3">
-              Each language’s words go to their own deck with a “Qari” note type, so your other decks aren’t touched. To put them into a deck you already have, type its exact name (use :: for a
-              subdeck).
-            </p>
-            {langs.map((l) => (
-              <label key={l} className="mt-2 flex items-center gap-3">
-                <span className="w-20 shrink-0 text-ink-2">{LANG_NAMES[l] || l}</span>
-                <input
-                  value={settings.ankiDecks[l] ?? ''}
-                  placeholder={defaultDeck(l)}
-                  onChange={(e) => updateSettings({ ankiDecks: { ...settings.ankiDecks, [l]: e.target.value } })}
-                  dir="auto"
-                  className="h-10 min-w-0 flex-1 rounded-lg border border-line bg-paper-2 px-3 outline-none focus:border-moss"
-                />
-              </label>
-            ))}
-          </details>
         )}
       </main>
     </div>

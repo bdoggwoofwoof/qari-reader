@@ -81,9 +81,7 @@ export default function PageViewer({ docId, page, label, onClose }: { docId: str
     <div className="fixed inset-0 z-50 flex flex-col bg-paper" role="dialog" aria-modal="true" aria-label="Original page">
       <div className="flex h-14 shrink-0 items-center gap-1 border-b border-line px-2 pt-[env(safe-area-inset-top)]">
         <IconButton icon="close" label="Close" onClick={onClose} />
-        <div className="flex-1 text-[0.95rem] font-semibold">
-          Original page{index === page && label ? ` · p. ${label}` : total ? ` · ${index + 1} of ${total}` : ''}
-        </div>
+        <div className="flex-1 text-base font-semibold">Original page{index === page && label ? ` · p. ${label}` : total ? ` · ${index + 1} of ${total}` : ''}</div>
         <button type="button" onClick={() => setZoom((z) => (z === 1 ? 2 : 1))} className="h-9 rounded-full border border-line px-3 text-sm" disabled={state !== 'ready'}>
           {zoom === 1 ? 'Zoom in' : 'Fit width'}
         </button>
@@ -100,7 +98,7 @@ export default function PageViewer({ docId, page, label, onClose }: { docId: str
           </div>
         )}
         {state === 'error' && <p className="p-8 text-center text-danger">This page couldn’t be shown.</p>}
-        <canvas ref={canvas} className={`mx-auto block bg-white shadow-[0_2px_14px_rgb(0_0_0/0.12)] ${state === 'ready' ? '' : 'hidden'}`} />
+        <canvas ref={canvas} className={`mx-auto block bg-white shadow-float ${state === 'ready' ? '' : 'hidden'}`} />
       </div>
     </div>
   )

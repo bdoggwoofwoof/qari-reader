@@ -4,7 +4,7 @@ import { getVoices, onlyBasic, onVoicesChanged, pickVoice, platform, SAMPLES, sp
 import { isEngineVoice, usable, useVoiceState } from '../lib/voices'
 import VoicePicker, { voiceLabel } from './VoicePicker'
 import { LANG_NAMES, type Lang } from '../types'
-import { Icon, IconButton, Sheet } from './ui'
+import { Button, Icon, IconButton, Sheet } from './ui'
 
 const CHECK_LANGS: Lang[] = ['en', 'ar', 'fr', 'de']
 
@@ -76,11 +76,12 @@ export default function VoiceCheck({ open, onClose }: { open: boolean; onClose: 
           <div className="mt-4 rounded-xl bg-paper-2 px-4 py-3 text-sm">
             <p className="font-semibold">Get natural voices for {needs.map((l) => LANG_NAMES[l]).join(', ')}</p>
             <p className="mt-1 text-ink-2">
-              Qari voices are free and download once (about 60 MB each). They sound natural, work offline and keep reading when your screen locks. {plat === 'ios' ? 'iPhone doesn’t let web apps use the Enhanced voices from Settings, so this is the way to get good voices on your phone.' : ''}
+              Qari voices are free and download once (about 60 MB each). They sound natural, work offline and keep reading when your screen locks.{' '}
+              {plat === 'ios' ? 'iPhone doesn’t let web apps use the Enhanced voices from Settings, so this is the way to get good voices on your phone.' : ''}
             </p>
-            <button type="button" onClick={() => setPicker(true)} className="mt-2 inline-flex h-10 items-center gap-1.5 rounded-full bg-moss px-4 font-semibold text-moss-ink">
+            <Button kind="primary" onClick={() => setPicker(true)} className="mt-2">
               <Icon name="download" size={16} /> Choose voices
-            </button>
+            </Button>
           </div>
         )}
         <p className="mt-4 text-sm text-ink-3">
@@ -89,9 +90,9 @@ export default function VoiceCheck({ open, onClose }: { open: boolean; onClose: 
             All voices
           </button>
         </p>
-        <button type="button" onClick={close} className="mt-4 mb-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-moss font-semibold text-moss-ink">
+        <Button kind="primary" onClick={close} className="mt-4 mb-2 w-full">
           <Icon name="check" size={18} /> Done
-        </button>
+        </Button>
       </Sheet>
       <VoicePicker open={open && picker} onClose={() => setPicker(false)} langs={order} />
     </>

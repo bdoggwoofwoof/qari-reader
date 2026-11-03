@@ -19,7 +19,7 @@ import { claudeStatus } from '../lib/translate'
 import { engineVoiceFor, isEngineVoice, usable, useVoiceState } from '../lib/voices'
 import VoicePicker, { voiceLabel } from './VoicePicker'
 import { countNew, isKnown, isLearning, isTrackable, setKnown, useVocab, vocabKey } from '../lib/vocab'
-import { Icon, IconButton, Sheet } from './ui'
+import { Button, Chip, Choices, Icon, IconButton, Section, Segmented, Sheet, Toggle } from './ui'
 
 interface BlockInfo {
   lang: Lang
@@ -254,21 +254,9 @@ function LineFocus({ on }: { on: boolean }) {
     <div
       ref={band}
       aria-hidden="true"
-      className="pointer-events-none fixed top-0 z-20 rounded-lg opacity-0 transition-[transform,height] duration-200 ease-out"
+      className="pointer-events-none fixed top-0 z-20 rounded-xl opacity-0 transition-[transform,height] duration-200 ease-out"
       style={{ boxShadow: '0 0 0 200vmax color-mix(in srgb, var(--paper) 72%, transparent)' }}
     />
-  )
-}
-
-function Toggle({ checked, onChange, title, hint }: { checked: boolean; onChange: (v: boolean) => void; title: string; hint: string }) {
-  return (
-    <label className="mb-5 flex items-center justify-between gap-4">
-      <span>
-        <span className="block font-semibold">{title}</span>
-        <span className="text-sm text-ink-3">{hint}</span>
-      </span>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-5 w-5 shrink-0 accent-[var(--moss)]" />
-    </label>
   )
 }
 
@@ -311,6 +299,22 @@ export default function Reader({ id }: { id: string }) {
   const [picked, setPicked] = useState<Picked | null>(null)
   const [tocOpen, setTocOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<'listen' | 'read' | 'lang'>(() => {
+    try {
+      const t = localStorage.getItem('qari.settingsTab')
+      return t === 'read' || t === 'lang' ? t : 'listen'
+    } catch {
+      return 'listen'
+    }
+  })
+  const chooseSettingsTab = (t: 'listen' | 'read' | 'lang') => {
+    setSettingsTab(t)
+    try {
+      localStorage.setItem('qari.settingsTab', t)
+    } catch {
+      /* private mode */
+    }
+  }
   const [sleepOpen, setSleepOpen] = useState(false)
   const [speedOpen, setSpeedOpen] = useState(false)
   const [rsvp, setRsvp] = useState<{
@@ -1266,7 +1270,10 @@ export default function Reader({ id }: { id: string }) {
     const info = infoFor(chapter, b)
     if (!info?.sents.length) return
     if (playingRef.current) return jumpTo(b, start)
-    const si = Math.max(0, info.sents.findIndex((s) => start >= s.start && start < s.end))
+    const si = Math.max(
+      0,
+      info.sents.findIndex((s) => start >= s.start && start < s.end),
+    )
     pos.current = { chapter, block: b, sent: si }
     lastWord.current = start
     repeated.current = false
@@ -1480,10 +1487,10 @@ export default function Reader({ id }: { id: string }) {
   return (
     <div className="min-h-full">
       <header className="sticky top-0 z-30 border-b border-line/70 bg-paper/90 pt-[env(safe-area-inset-top)] backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-3xl items-center gap-1 px-2">
+        <div className="mx-auto flex h-14 max-w-[38rem] items-center gap-1 px-2">
           <IconButton icon="back" label="Library" onClick={() => go('')} />
-          <button type="button" onClick={() => openPanel('contents')} className="min-w-0 flex-1 rounded-lg px-1 text-left" aria-label={`Contents: ${meta.title}, ${chapterData.title}`}>
-            <h1 className="truncate text-[0.95rem] font-semibold" dir="auto">
+          <button type="button" onClick={() => openPanel('contents')} className="min-w-0 flex-1 rounded-xl px-1 text-left" aria-label={`Contents: ${meta.title}, ${chapterData.title}`}>
+            <h1 className="truncate text-base font-semibold" dir="auto">
               {meta.title}
             </h1>
             <div className="flex items-center gap-0.5 text-xs text-ink-3">
@@ -1497,10 +1504,9 @@ export default function Reader({ id }: { id: string }) {
           <span className="relative">
             <IconButton icon="list" label={highlights.length ? `Contents and ${highlights.length} notes` : 'Contents and notes'} onClick={() => openPanel(highlights.length ? 'notes' : 'contents')} />
             {highlights.length > 0 && (
-              <span className="pointer-events-none absolute top-1.5 right-1 min-w-4 rounded-full bg-mark px-1 text-center text-[0.65rem] leading-4 font-semibold text-ink">{highlights.length}</span>
+              <span className="pointer-events-none absolute top-0.5 right-0.5 min-w-5 rounded-full bg-mark px-1 text-center text-xs leading-5 font-semibold text-ink">{highlights.length}</span>
             )}
           </span>
-          <IconButton icon="words" label="Saved words" onClick={() => go('words')} className="max-[359px]:hidden" />
           <IconButton icon="sliders" label="Reading settings" onClick={() => setSettingsOpen(true)} />
         </div>
       </header>
@@ -1577,18 +1583,14 @@ export default function Reader({ id }: { id: string }) {
               <span className="nw-chip rounded px-1 font-semibold text-ink">{sectionNewCount}</span> new {sectionNewCount === 1 ? 'word' : 'words'} in this section. Done with it? Mark the ones you
               didn’t look up as known, so next time only the words you still need stand out.
             </p>
-            <button type="button" onClick={markSectionKnown} className="mt-2 h-9 rounded-full bg-moss px-4 font-semibold text-moss-ink">
+            <Button kind="primary" onClick={markSectionKnown} className="mt-2">
               Mark {sectionNewCount} as known
-            </button>
+            </Button>
           </div>
         )}
-        <div className="mt-12 flex justify-between gap-3 font-ui text-sm">
-          <button type="button" disabled={chapter === 0} onClick={() => goChapter(chapter - 1)} className="rounded-full border border-line px-4 py-2 disabled:opacity-30">
-            Previous section
-          </button>
-          <button type="button" disabled={isLast} onClick={() => goChapter(chapter + 1)} className="rounded-full border border-line px-4 py-2 disabled:opacity-30">
-            Next section
-          </button>
+        <div className="mt-12 flex justify-between gap-3 font-ui">
+          {chapter > 0 ? <Button onClick={() => goChapter(chapter - 1)}>Previous section</Button> : <span />}
+          {!isLast && <Button onClick={() => goChapter(chapter + 1)}>Next section</Button>}
         </div>
       </main>
 
@@ -1596,7 +1598,7 @@ export default function Reader({ id }: { id: string }) {
       <section aria-label="Player" className="safe-b fixed inset-x-0 bottom-0 z-30 px-3 pt-2">
         {selection && (
           <div className="mb-2 flex justify-center">
-            <div className="sheet-in flex items-center gap-1 rounded-full border border-line bg-paper p-1 shadow-[0_4px_18px_rgb(0_0_0/0.14)]" role="toolbar" aria-label="Selected text">
+            <div className="sheet-in flex items-center gap-1 rounded-full border border-line bg-paper p-1 shadow-float" role="toolbar" aria-label="Selected text">
               <button
                 type="button"
                 onMouseDown={(e) => e.preventDefault()}
@@ -1637,7 +1639,7 @@ export default function Reader({ id }: { id: string }) {
           </div>
         )}
         {meta.importing && !selection && (
-          <div className="mx-auto mb-2 flex max-w-md items-center gap-3 rounded-full border border-line bg-paper/95 px-4 py-1.5 text-xs text-ink-2 shadow-[0_4px_18px_rgb(0_0_0/0.08)]" role="status">
+          <div className="mx-auto mb-2 flex max-w-md items-center gap-3 rounded-full border border-line bg-paper/95 px-4 py-1.5 text-xs text-ink-2 shadow-float" role="status">
             <span className="shrink-0">Reading the rest of this PDF{importP !== null ? ` · ${Math.round(importP * 100)}%` : '…'}</span>
             <span className="h-1 flex-1 overflow-hidden rounded-full bg-line">
               <span className="block h-full bg-moss transition-[width]" style={{ width: `${Math.round((importP ?? 0) * 100)}%` }} />
@@ -1645,13 +1647,14 @@ export default function Reader({ id }: { id: string }) {
           </div>
         )}
         {follow === 'asking' && !selection && !playing && (
-          <div className="sheet-in mx-auto mb-2 max-w-md rounded-2xl border border-line bg-paper px-4 py-3 shadow-[0_4px_18px_rgb(0_0_0/0.10)]" role="status">
+          <div className="sheet-in mx-auto mb-2 max-w-md rounded-2xl border border-line bg-paper px-4 py-3 shadow-float" role="status">
             <p className="text-sm">
               <span className="font-semibold">Reading as you scroll?</span> Your placemark can follow the top of the screen, so you come back here next time.
             </p>
             <div className="mt-2 flex gap-2">
-              <button
-                type="button"
+              <Button
+                kind="primary"
+
                 onClick={() => {
                   setFollow('on')
                   handScrolledAt.current = Date.now()
@@ -1661,10 +1664,9 @@ export default function Reader({ id }: { id: string }) {
                     persist()
                   }
                 }}
-                className="h-9 rounded-full bg-moss px-4 text-sm font-semibold text-moss-ink"
               >
                 Follow my place
-              </button>
+              </Button>
               <button type="button" onClick={() => setFollow('off')} className="h-9 rounded-full border border-line px-4 text-sm">
                 No, just looking
               </button>
@@ -1676,7 +1678,7 @@ export default function Reader({ id }: { id: string }) {
             <button
               type="button"
               onClick={() => setFollow('off')}
-              className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line bg-paper px-3 text-xs text-ink-2 shadow-[0_4px_18px_rgb(0_0_0/0.08)]"
+              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-paper px-3 text-xs text-ink-2 shadow-float"
               aria-label="Stop the placemark following your scrolling"
             >
               Placemark follows your scrolling <Icon name="close" size={13} />
@@ -1688,15 +1690,15 @@ export default function Reader({ id }: { id: string }) {
             <button
               type="button"
               onClick={backToReading}
-              className="sheet-in inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-paper px-4 text-sm font-semibold text-moss shadow-[0_4px_18px_rgb(0_0_0/0.10)]"
+              className="sheet-in inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-paper px-4 text-sm font-semibold text-moss shadow-float"
             >
               <Icon name="read" size={16} /> Back to reading
             </button>
           </div>
         )}
-        <div className="mx-auto max-w-md rounded-[28px] border border-line bg-paper/95 px-2 pt-2 pb-1.5 shadow-[0_6px_30px_rgb(0_0_0/0.10)] backdrop-blur">
-          <div className="flex items-center justify-between gap-3 px-3 text-xs text-ink-3">
-            <span className="min-w-0 truncate tabular-nums" aria-live="off">
+        <div className="mx-auto max-w-md rounded-[28px] border border-line bg-paper/95 px-2 pt-1 pb-1.5 shadow-float backdrop-blur">
+          <div className="flex items-center justify-between gap-2 pl-3">
+            <span className="min-w-0 truncate text-xs text-ink-3 tabular-nums" aria-live="off">
               {fmtMinutes(secsLeft)} left
               <span className="max-[420px]:hidden"> in section</span>
             </span>
@@ -1713,23 +1715,23 @@ export default function Reader({ id }: { id: string }) {
                     offset: lastWord.current ?? sent?.start ?? 0,
                   })
                 }}
-                className="inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 hover:bg-paper-2"
+                className="inline-flex h-11 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-sm text-ink-2 hover:bg-paper-2 hover:text-ink"
                 data-tour="speedread"
               >
-                <Icon name="bolt" size={14} /> Speed read
+                <Icon name="bolt" size={17} /> Speed read
               </button>
               <button
                 type="button"
                 onClick={() => setSleepOpen(true)}
-                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 tabular-nums ${sleepLabel ? 'bg-wash font-semibold text-ink' : 'hover:bg-paper-2'}`}
+                className={`inline-flex h-11 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-sm tabular-nums ${sleepLabel ? 'bg-wash font-semibold text-ink' : 'text-ink-2 hover:bg-paper-2 hover:text-ink'}`}
                 aria-label={sleepLabel ? `Sleep timer: ${sleepLabel}` : 'Sleep timer'}
               >
-                <Icon name="moon" size={14} /> {sleepLabel || 'Sleep'}
+                <Icon name="moon" size={17} /> {sleepLabel || 'Sleep'}
               </button>
             </span>
           </div>
           <div
-            className="group mx-3 mt-1.5 mb-1 cursor-pointer py-1.5"
+            className="group mx-3 -mt-1 cursor-pointer py-2.5"
             onClick={seek}
             role="slider"
             aria-label="Position in section"
@@ -1750,19 +1752,19 @@ export default function Reader({ id }: { id: string }) {
               data-tour="speed"
               aria-label={`${LANG_NAMES[curLang] || curLang} speed ${fmtRate(curRate)}×, tap to change`}
             >
-              {chapterLangs.length > 1 && <span className="mr-1 text-[0.7rem] font-semibold uppercase text-ink-3">{curLang}</span>}
+              {chapterLangs.length > 1 && <span className="mr-1 text-xs font-semibold uppercase text-ink-3">{curLang}</span>}
               {fmtRate(curRate)}×
             </button>
             <HoldButton icon="prev" label="Previous sentence (hold for the paragraph)" onTap={() => step(-1)} onHold={() => stepParagraph(-1)} />
-            <button
-              type="button"
+            <Button
+              kind="primary"
+
               onClick={toggle}
               data-tour="play"
               aria-label={playing ? 'Pause' : 'Play'}
-              className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-moss text-moss-ink hover:opacity-90"
             >
               <Icon name={playing ? 'pause' : 'play'} size={26} />
-            </button>
+            </Button>
             <HoldButton icon="next" label="Next sentence (hold for the next paragraph)" onTap={() => step(1)} onHold={() => stepParagraph(1)} />
             <IconButton icon="repeat" label="Repeat this sentence" onClick={repeatSentence} className={settings.afterSentence !== 'continue' ? 'text-moss' : ''} />
           </div>
@@ -1798,7 +1800,7 @@ export default function Reader({ id }: { id: string }) {
                   })
                   setSpeedOpen(false)
                 }}
-                className={`h-12 rounded-xl border font-semibold tabular-nums ${on ? 'border-moss bg-wash text-moss' : 'border-line hover:bg-paper-2'}`}
+                className={`h-11 rounded-xl border font-semibold tabular-nums ${on ? 'border-moss bg-wash text-moss' : 'border-line hover:bg-paper-2'}`}
               >
                 {fmtRate(r)}×
               </button>
@@ -1832,7 +1834,7 @@ export default function Reader({ id }: { id: string }) {
                 setNow(Date.now())
                 setSleepOpen(false)
               }}
-              className="h-12 rounded-xl border border-line hover:bg-paper-2"
+              className="h-11 rounded-xl border border-line hover:bg-paper-2"
             >
               {m} minutes
             </button>
@@ -1843,7 +1845,7 @@ export default function Reader({ id }: { id: string }) {
               setSleep({ kind: 'section', chapter: hl.chapter })
               setSleepOpen(false)
             }}
-            className={`h-12 rounded-xl border hover:bg-paper-2 ${sleep.kind === 'section' ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
+            className={`h-11 rounded-xl border hover:bg-paper-2 ${sleep.kind === 'section' ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
           >
             End of section
           </button>
@@ -1853,7 +1855,7 @@ export default function Reader({ id }: { id: string }) {
               setSleep({ kind: 'off' })
               setSleepOpen(false)
             }}
-            className={`h-12 rounded-xl border hover:bg-paper-2 ${sleep.kind === 'off' ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
+            className={`h-11 rounded-xl border hover:bg-paper-2 ${sleep.kind === 'off' ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
           >
             Off
           </button>
@@ -1862,348 +1864,309 @@ export default function Reader({ id }: { id: string }) {
       </Sheet>
 
       <Sheet open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Reading settings" wide>
-        <section className="mb-6">
-          <h3 className="mb-1 font-semibold">Speed</h3>
-          <p className="mb-3 text-sm text-ink-3">Each language keeps its own speed.</p>
-          {chapterLangs.map((lang) => {
-            const r = rateFor(settings, lang)
-            return (
-              <div key={lang} className="mb-3">
-                <div className="mb-1 flex items-baseline justify-between text-sm">
-                  <label htmlFor={'r-' + lang} className="text-ink-2">
-                    {LANG_NAMES[lang] || lang}
-                  </label>
-                  <span className="tabular-nums text-ink-2">{r.toFixed(2)}×</span>
-                </div>
-                <input
-                  id={'r-' + lang}
-                  type="range"
-                  min={0.5}
-                  max={3}
-                  step={0.05}
-                  value={r}
-                  onChange={(e) =>
-                    updateSettings({
-                      rates: {
-                        ...settings.rates,
-                        [lang]: Number(e.target.value),
-                      },
-                    })
-                  }
-                  className="w-full"
-                />
-              </div>
-            )
-          })}
-          <p className="text-xs text-ink-3">Some device voices top out around 2×; going higher won’t speed them up further.</p>
-        </section>
+        <div className="sticky -top-4 z-10 -mx-5 -mt-3 mb-2 bg-paper px-5 pt-4 pb-3">
+          <Segmented
+            label="Settings group"
+            value={settingsTab}
+            onChange={chooseSettingsTab}
+            options={[
+              ['listen', 'Listening'],
+              ['read', 'Reading'],
+              ['lang', 'Languages'],
+            ]}
+          />
+        </div>
 
-        <section className="mb-6">
-          <h3 className="mb-1 font-semibold">After each sentence</h3>
-          <p className="mb-2 text-sm text-ink-3">For listening practice and shadowing. The repeat button replays a sentence any time.</p>
-          <div className="grid grid-cols-3 gap-2">
-            {(
-              [
-                ['continue', 'Keep going'],
-                ['pause', 'Pause'],
-                ['repeat', 'Repeat once'],
-              ] as const
-            ).map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => updateSettings({ afterSentence: k })}
-                className={`h-11 rounded-xl border text-sm ${settings.afterSentence === k ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
+        {settingsTab === 'listen' && (
+          <>
+            <Section title="Playback speed" hint="Each language keeps its own speed.">
+              {chapterLangs.map((lang) => {
+                const r = rateFor(settings, lang)
+                return (
+                  <div key={lang} className="mb-3">
+                    <div className="mb-1 flex items-baseline justify-between text-sm">
+                      <label htmlFor={'r-' + lang} className="text-ink-2">
+                        {LANG_NAMES[lang] || lang}
+                      </label>
+                      <span className="tabular-nums text-ink-2">{r.toFixed(2)}×</span>
+                    </div>
+                    <input
+                      id={'r-' + lang}
+                      type="range"
+                      min={0.5}
+                      max={3}
+                      step={0.05}
+                      value={r}
+                      onChange={(e) => updateSettings({ rates: { ...settings.rates, [lang]: Number(e.target.value) } })}
+                      className="h-11 w-full"
+                    />
+                  </div>
+                )
+              })}
+              <p className="text-xs text-ink-3">Some device voices top out around 2×; going higher won’t speed them up further.</p>
+            </Section>
+
+            <Section title="After each sentence" hint="For listening practice and shadowing. The repeat button replays a sentence any time.">
+              <Choices
+                label="After each sentence"
+                value={settings.afterSentence}
+                onChange={(k) => updateSettings({ afterSentence: k })}
+                options={[
+                  ['continue', 'Keep going'],
+                  ['pause', 'Pause'],
+                  ['repeat', 'Repeat once'],
+                ]}
+              />
+            </Section>
+
+            <Section title="Voices">
+              {chapterLangs.map((lang) => {
+                const id = settings.voices[lang]
+                const basic = !(isEngineVoice(id) && usable(id)) && (onlyBasic(lang) || !pickVoice(lang, id))
+                return (
+                  <div key={lang} className="mb-3 flex items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm text-ink-2">{LANG_NAMES[lang] || lang}</div>
+                      <div className="truncate font-semibold">{voiceLabel(lang, id)}</div>
+                      {basic && <div className="text-xs text-ink-3">Get a Qari voice for natural reading that works offline.</div>}
+                    </div>
+                    <IconButton
+                      icon="speaker"
+                      label={`Hear the ${LANG_NAMES[lang] || lang} voice`}
+                      onClick={() => {
+                        pause()
+                        speakWord(SAMPLES[lang] || SAMPLES.en, lang, id, rateFor(settings, lang))
+                      }}
+                      className="border border-edge"
+                    />
+                    <Button
+                      kind={basic ? 'primary' : 'secondary'}
+                      onClick={() => {
+                        setPickerLang(lang)
+                        setPickerOpen(true)
+                      }}
+                    >
+                      {basic ? 'Better voice' : 'Change'}
+                    </Button>
+                  </div>
+                )
+              })}
+            </Section>
+
+            <Section title="While it reads">
+              <Toggle checked={settings.autoScroll} onChange={(v) => updateSettings({ autoScroll: v })} title="Follow along" hint="Scroll to keep the spoken sentence in view." />
+              <Toggle
+                checked={settings.skipCitations}
+                onChange={(v) => updateSettings({ skipCitations: v })}
+                title="Skip citations and links"
+                hint="Don’t read “(Smith, 2019)”, “[12]” or web addresses aloud. They stay on the page."
+              />
+            </Section>
+
+            <Section title="Pronunciations" hint="Teach the voice names and terms it gets wrong. Applies to every book.">
+              {settings.pronunciations.length > 0 && (
+                <ul className="mb-2 divide-y divide-line rounded-xl border border-line">
+                  {settings.pronunciations.map((p, i) => (
+                    <li key={i} className="flex items-center gap-2 px-3 py-1 text-sm">
+                      <span className="min-w-0 flex-1 truncate" dir="auto">
+                        <span className="font-semibold">{p.from}</span> <span className="text-ink-3">says</span> {p.to}
+                      </span>
+                      <IconButton
+                        icon="speaker"
+                        label={`Hear ${p.from}`}
+                        size={17}
+                        onClick={() => {
+                          pause()
+                          speakWord(p.to, meta.lang, settings.voices[meta.lang])
+                        }}
+                      />
+                      <IconButton icon="trash" label={`Remove ${p.from}`} size={17} onClick={() => updateSettings({ pronunciations: settings.pronunciations.filter((_, j) => j !== i) })} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <form
+                className="flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  if (!newFrom.trim() || !newTo.trim()) return
+                  updateSettings({ pronunciations: [...settings.pronunciations, { from: newFrom.trim(), to: newTo.trim() }] })
+                  setNewFrom('')
+                  setNewTo('')
+                }}
               >
-                {label}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="mb-6">
-          <h3 className="mb-2 font-semibold">Voices</h3>
-          {chapterLangs.map((lang) => {
-            const id = settings.voices[lang]
-            const basic = !(isEngineVoice(id) && usable(id)) && (onlyBasic(lang) || !pickVoice(lang, id))
-            return (
-              <div key={lang} className="mb-3 flex items-center gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm text-ink-2">{LANG_NAMES[lang] || lang}</div>
-                  <div className="truncate font-semibold">{voiceLabel(lang, id)}</div>
-                  {basic && <div className="text-xs text-ink-3">Get a Qari voice for natural reading that works offline.</div>}
-                </div>
-                <IconButton
-                  icon="speaker"
-                  label={`Hear the ${LANG_NAMES[lang] || lang} voice`}
-                  onClick={() => {
-                    pause()
-                    speakWord(SAMPLES[lang] || SAMPLES.en, lang, id, rateFor(settings, lang))
-                  }}
-                  className="border border-line"
+                <input
+                  value={newFrom}
+                  onChange={(e) => setNewFrom(e.target.value)}
+                  placeholder="Word"
+                  dir="auto"
+                  aria-label="Word as written"
+                  className="h-11 min-w-0 flex-1 rounded-xl border border-edge bg-paper-2 px-3"
                 />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPickerLang(lang)
-                    setPickerOpen(true)
-                  }}
-                  className={`h-10 shrink-0 rounded-full px-4 text-sm ${basic ? 'bg-moss font-semibold text-moss-ink' : 'border border-line'}`}
-                >
-                  {basic ? 'Better voice' : 'Change'}
-                </button>
-              </div>
-            )
-          })}
-        </section>
-
-        <Toggle
-          checked={settings.skipCitations}
-          onChange={(v) => updateSettings({ skipCitations: v })}
-          title="Skip citations and links"
-          hint="Don’t read “(Smith, 2019)”, “[12]” or web addresses aloud. They stay on the page."
-        />
-
-        <section className="mb-6">
-          <h3 className="mb-1 font-semibold">Pronunciations</h3>
-          <p className="mb-2 text-sm text-ink-3">Teach the voice names and terms it gets wrong. Applies to every book.</p>
-          {settings.pronunciations.length > 0 && (
-            <ul className="mb-2 divide-y divide-line rounded-xl border border-line">
-              {settings.pronunciations.map((p, i) => (
-                <li key={i} className="flex items-center gap-2 px-3 py-1.5 text-sm">
-                  <span className="min-w-0 flex-1 truncate" dir="auto">
-                    <span className="font-semibold">{p.from}</span> <span className="text-ink-3">says</span> {p.to}
-                  </span>
-                  <IconButton
-                    icon="speaker"
-                    label={`Hear ${p.from}`}
-                    size={17}
-                    onClick={() => {
-                      pause()
-                      speakWord(p.to, meta.lang, settings.voices[meta.lang])
-                    }}
-                  />
-                  <IconButton
-                    icon="trash"
-                    label={`Remove ${p.from}`}
-                    size={17}
-                    onClick={() =>
-                      updateSettings({
-                        pronunciations: settings.pronunciations.filter((_, j) => j !== i),
-                      })
-                    }
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (!newFrom.trim() || !newTo.trim()) return
-              updateSettings({
-                pronunciations: [...settings.pronunciations, { from: newFrom.trim(), to: newTo.trim() }],
-              })
-              setNewFrom('')
-              setNewTo('')
-            }}
-          >
-            <input
-              value={newFrom}
-              onChange={(e) => setNewFrom(e.target.value)}
-              placeholder="Word"
-              dir="auto"
-              aria-label="Word as written"
-              className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-paper-2 px-3"
-            />
-            <input
-              value={newTo}
-              onChange={(e) => setNewTo(e.target.value)}
-              placeholder="Say it as"
-              dir="auto"
-              aria-label="Say it as"
-              className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-paper-2 px-3"
-            />
-            <button type="submit" disabled={!newFrom.trim() || !newTo.trim()} className="h-11 rounded-xl bg-moss px-4 font-semibold text-moss-ink disabled:opacity-40">
-              Add
-            </button>
-          </form>
-        </section>
-
-        <section className="mb-6">
-          <label className="mb-2 block font-semibold" htmlFor="doc-lang">
-            Language of this book
-          </label>
-          <select id="doc-lang" value={meta.lang} onChange={(e) => setDocLang(e.target.value)} className="h-11 w-full rounded-xl border border-line bg-paper-2 px-3">
-            {Object.entries(LANG_NAMES).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-xs text-ink-3">Paragraphs in Arabic script are read with the Arabic voice automatically.</p>
-        </section>
-
-        <section className="mb-6">
-          <h3 className="mb-1 font-semibold">Languages you’re learning</h3>
-          <p className="mb-2 text-sm text-ink-3">
-            In these, words you haven’t marked known have a <span className="nw text-ink">dotted underline</span> and saved words are <span className="lw text-ink">underlined</span>.
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {Object.entries(LANG_NAMES).map(([k, v]) => {
-              const on = settings.learning.includes(k)
-              return (
-                <button
-                  key={k}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() =>
-                    updateSettings({
-                      learning: on ? settings.learning.filter((x) => x !== k) : [...settings.learning, k],
-                    })
-                  }
-                  className={`h-8 rounded-full border px-3 text-sm ${on ? 'border-moss bg-wash font-semibold' : 'border-line text-ink-2'}`}
-                >
-                  {v}
-                </button>
-              )
-            })}
-          </div>
-        </section>
-
-        {(claudeAvail || settings.translateCode) && (
-          <section className="mb-6">
-            <label htmlFor="tr-code" className="mb-1 block font-semibold">
-              Claude translation
-            </label>
-            <p className="mb-2 text-sm text-ink-3">
-              Explains phrases in context and says whether Arabic is Shami, Egyptian or Fusha. Enter the access code you set in Vercel; leave it empty to use the free translator.
-            </p>
-            <input
-              id="tr-code"
-              type="password"
-              autoComplete="off"
-              value={settings.translateCode || ''}
-              onChange={(e) => updateSettings({ translateCode: e.target.value })}
-              placeholder="Access code"
-              className="h-11 w-full rounded-xl border border-line bg-paper-2 px-3 outline-none focus:border-moss"
-            />
-          </section>
+                <input
+                  value={newTo}
+                  onChange={(e) => setNewTo(e.target.value)}
+                  placeholder="Say it as"
+                  dir="auto"
+                  aria-label="Say it as"
+                  className="h-11 min-w-0 flex-1 rounded-xl border border-edge bg-paper-2 px-3"
+                />
+                <Button type="submit" kind="primary" disabled={!newFrom.trim() || !newTo.trim()}>
+                  Add
+                </Button>
+              </form>
+            </Section>
+          </>
         )}
 
-        <section className="mb-6 flex items-center justify-between gap-4">
-          <h3 className="font-semibold">Text size</h3>
-          <div className="flex items-center gap-1">
-            <IconButton
-              icon="minus"
-              label="Smaller text"
-              onClick={() =>
-                updateSettings({
-                  fontSize: Math.max(14, settings.fontSize - 1),
-                })
+        {settingsTab === 'read' && (
+          <>
+            <Section title="Page">
+              <Choices
+                label="Page"
+                value={settings.theme}
+                onChange={(t) => updateSettings({ theme: t })}
+                options={[
+                  ['light', 'Light'],
+                  ['sepia', 'Sepia'],
+                  ['dark', 'Dark'],
+                ]}
+              />
+            </Section>
+
+            <Section
+              title="Text size"
+              aside={
+                <div className="flex items-center gap-1">
+                  <IconButton icon="minus" label="Smaller text" onClick={() => updateSettings({ fontSize: Math.max(14, settings.fontSize - 1) })} className="border border-edge" />
+                  <span className="w-10 text-center tabular-nums">{settings.fontSize}</span>
+                  <IconButton icon="plus" label="Larger text" onClick={() => updateSettings({ fontSize: Math.min(32, settings.fontSize + 1) })} className="border border-edge" />
+                </div>
               }
-              className="border border-line"
             />
-            <span className="w-10 text-center tabular-nums">{settings.fontSize}</span>
-            <IconButton
-              icon="plus"
-              label="Larger text"
-              onClick={() =>
-                updateSettings({
-                  fontSize: Math.min(32, settings.fontSize + 1),
-                })
+
+            <Section title="Reading font" hint="Including fonts made for dyslexia. Applies to every book; Arabic keeps its own font.">
+              <div className="grid grid-cols-2 gap-2">
+                {(Object.entries(READ_FONTS) as [ReadFont, (typeof READ_FONTS)[ReadFont]][]).map(([k, f]) => {
+                  const on = (settings.readFont || 'literata') === k
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => updateSettings({ readFont: k })}
+                      aria-pressed={on}
+                      className={`flex flex-col items-start rounded-xl border px-3 py-2 text-left ${on ? 'border-moss bg-wash' : 'border-edge hover:bg-paper-2'}`}
+                    >
+                      <span className="text-lg leading-snug" style={{ fontFamily: f.family, letterSpacing: f.spacing }}>
+                        Read along
+                      </span>
+                      <span className={`text-xs ${on ? 'font-semibold' : 'text-ink-2'}`}>
+                        {f.label} <span className="font-normal text-ink-3">· {f.hint}</span>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </Section>
+
+            <Section title="Reading aids">
+              <Toggle
+                checked={!!settings.bionic}
+                onChange={(v) => updateSettings({ bionic: v })}
+                title="Bold word starts"
+                hint="Bionic reading: the first part of each word is bold, so your eye has an anchor and moves faster. Not used for Arabic."
+              />
+              <Toggle
+                checked={!!settings.lineFocus}
+                onChange={(v) => updateSettings({ lineFocus: v })}
+                title="Line focus"
+                hint="Dims everything except the line being read, so it’s easier to keep your place when you’re tired. It follows the voice, or the word you tap."
+              />
+              <p className="mt-1 text-sm text-ink-3">
+                For speed reading, tap <span className="font-semibold text-ink-2">Speed read</span> above the play button: one word at a time, with a red letter to keep your eye still.
+              </p>
+            </Section>
+          </>
+        )}
+
+        {settingsTab === 'lang' && (
+          <>
+            <Section title={<label htmlFor="doc-lang">Language of this book</label>}>
+              <select id="doc-lang" value={meta.lang} onChange={(e) => setDocLang(e.target.value)} className="h-11 w-full rounded-xl border border-edge bg-paper-2 px-3">
+                {Object.entries(LANG_NAMES).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-ink-3">Paragraphs in Arabic script are read with the Arabic voice automatically.</p>
+            </Section>
+
+            <Section
+              title="Languages you’re learning"
+              hint={
+                <>
+                  In these, words you haven’t marked known have a <span className="nw text-ink">dotted underline</span> and saved words are <span className="lw text-ink">underlined</span>.
+                </>
               }
-              className="border border-line"
-            />
-          </div>
-        </section>
+            >
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(LANG_NAMES).map(([k, v]) => {
+                  const on = settings.learning.includes(k)
+                  return (
+                    <Chip key={k} on={on} onClick={() => updateSettings({ learning: on ? settings.learning.filter((x) => x !== k) : [...settings.learning, k] })}>
+                      {v}
+                    </Chip>
+                  )
+                })}
+              </div>
+            </Section>
 
-        <section className="mb-6">
-          <h3 className="mb-2 font-semibold">Page</h3>
-          <div className="grid grid-cols-3 gap-2">
-            {(['light', 'sepia', 'dark'] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => updateSettings({ theme: t })}
-                className={`h-11 rounded-xl border capitalize ${settings.theme === t ? 'border-moss bg-wash font-semibold' : 'border-line'}`}
+            <Section title="Arabic">
+              <div className="mb-2 grid grid-cols-3 gap-2">
+                {(Object.entries(ARABIC_FONTS) as [ArabicFont, (typeof ARABIC_FONTS)[ArabicFont]][]).map(([k, f]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => updateSettings({ arabicFont: k })}
+                    aria-label={f.label}
+                    aria-pressed={settings.arabicFont === k}
+                    className={`flex flex-col items-center rounded-xl border px-1 py-2 ${settings.arabicFont === k ? 'border-moss bg-wash' : 'border-edge hover:bg-paper-2'}`}
+                  >
+                    <span lang="ar" dir="rtl" className="text-xl leading-tight" style={{ fontFamily: f.family }}>
+                      {settings.showHarakat ? 'ثَبَتَ تُجّار' : 'ثبت تجار'}
+                    </span>
+                    <span className={`mt-1 text-xs ${settings.arabicFont === k ? 'font-semibold' : 'text-ink-2'}`}>{f.label}</span>
+                  </button>
+                ))}
+              </div>
+              <Toggle
+                checked={settings.showHarakat}
+                onChange={(v) => updateSettings({ showHarakat: v })}
+                title="Show vowel marks"
+                hint={hasArabic ? 'Turn off to practise reading unvoweled text. The voice still reads it fully voweled.' : 'Applies to Arabic text.'}
+              />
+            </Section>
+
+            {(claudeAvail || settings.translateCode) && (
+              <Section
+                title={<label htmlFor="tr-code">Claude translation</label>}
+                hint="Explains phrases in context and says whether Arabic is Shami, Egyptian or Fusha. Enter the access code you set in Vercel; leave it empty to use the free translator."
               >
-                {t}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="mb-6">
-          <h3 className="mb-1 font-semibold">Easier reading</h3>
-          <p className="mb-3 text-sm text-ink-3">Fonts made for dyslexia, and bold word starts. They apply to every book; Arabic keeps its own font.</p>
-          <div className="mb-4 grid grid-cols-2 gap-2">
-            {(Object.entries(READ_FONTS) as [ReadFont, (typeof READ_FONTS)[ReadFont]][]).map(([k, f]) => {
-              const on = (settings.readFont || 'literata') === k
-              return (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => updateSettings({ readFont: k })}
-                  aria-pressed={on}
-                  className={`flex flex-col items-start rounded-xl border px-3 py-2 text-left ${on ? 'border-moss bg-wash' : 'border-line'}`}
-                >
-                  <span className="text-lg leading-snug" style={{ fontFamily: f.family, letterSpacing: f.spacing }}>
-                    Read along
-                  </span>
-                  <span className={`text-xs ${on ? 'font-semibold' : 'text-ink-2'}`}>
-                    {f.label} <span className="font-normal text-ink-3">· {f.hint}</span>
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-          <Toggle
-            checked={!!settings.bionic}
-            onChange={(v) => updateSettings({ bionic: v })}
-            title="Bold word starts"
-            hint="Bionic reading: the first part of each word is bold, so your eye has an anchor and moves faster. Not used for Arabic."
-          />
-          <Toggle
-            checked={!!settings.lineFocus}
-            onChange={(v) => updateSettings({ lineFocus: v })}
-            title="Line focus"
-            hint="Dims everything except the line being read, so it’s easier to keep your place when you’re tired. It follows the voice, or the word you tap."
-          />
-          <p className="-mt-2 text-sm text-ink-3">
-            For speed reading, tap <span className="font-semibold text-ink-2">Speed read</span> above the play button: one word at a time, with a red letter to keep your eye still.
-          </p>
-        </section>
-
-        <section className="mb-6">
-          <h3 className="mb-2 font-semibold">Arabic</h3>
-          <div className="mb-4 grid grid-cols-3 gap-2">
-            {(Object.entries(ARABIC_FONTS) as [ArabicFont, (typeof ARABIC_FONTS)[ArabicFont]][]).map(([k, f]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => updateSettings({ arabicFont: k })}
-                aria-label={f.label}
-                className={`flex flex-col items-center rounded-xl border px-1 py-2 ${settings.arabicFont === k ? 'border-moss bg-wash' : 'border-line'}`}
-              >
-                <span lang="ar" dir="rtl" className="text-xl leading-tight" style={{ fontFamily: f.family }}>
-                  {settings.showHarakat ? 'ثَبَتَ تُجّار' : 'ثبت تجار'}
-                </span>
-                <span className={`mt-1 text-xs ${settings.arabicFont === k ? 'font-semibold' : 'text-ink-2'}`}>{f.label}</span>
-              </button>
-            ))}
-          </div>
-          <Toggle
-            checked={settings.showHarakat}
-            onChange={(v) => updateSettings({ showHarakat: v })}
-            title="Show vowel marks"
-            hint={hasArabic ? 'Turn off to practise reading unvoweled text. The voice still reads it fully voweled.' : 'Applies to Arabic text.'}
-          />
-        </section>
-
-        <Toggle checked={settings.autoScroll} onChange={(v) => updateSettings({ autoScroll: v })} title="Follow along" hint="Scroll to keep the spoken sentence in view." />
-        <p className="pb-2 text-xs text-ink-3">Tip: tap a word to start reading from there, double-tap it to look it up.</p>
+                <input
+                  id="tr-code"
+                  type="password"
+                  autoComplete="off"
+                  value={settings.translateCode || ''}
+                  onChange={(e) => updateSettings({ translateCode: e.target.value })}
+                  placeholder="Access code"
+                  className="h-11 w-full rounded-xl border border-edge bg-paper-2 px-3 outline-none focus:border-moss"
+                />
+              </Section>
+            )}
+          </>
+        )}
+        <p className="border-t border-line pt-3 pb-2 text-xs text-ink-3">Tip: tap a word to start reading from there, double-tap it to look it up.</p>
       </Sheet>
 
       <LookupSheet
@@ -2280,7 +2243,14 @@ export default function Reader({ id }: { id: string }) {
           onProgress={(at) => {
             const info = infoFor(at.chapter, at.block)
             if (!info) return
-            pos.current = { chapter: at.chapter, block: at.block, sent: Math.max(0, info.sents.findIndex((x) => at.start >= x.start && at.start < x.end)) }
+            pos.current = {
+              chapter: at.chapter,
+              block: at.block,
+              sent: Math.max(
+                0,
+                info.sents.findIndex((x) => at.start >= x.start && at.start < x.end),
+              ),
+            }
             lastWord.current = at.start
             persist()
           }}

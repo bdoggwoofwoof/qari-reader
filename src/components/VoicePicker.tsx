@@ -15,30 +15,10 @@ export function voiceLabel(lang: Lang, chosen?: string) {
   return d ? `${d.name}${voiceTier(d) < 2 ? ' · basic' : ''}` : 'No voice'
 }
 
-function Row({
-  selected,
-  title,
-  note,
-  onUse,
-  onHear,
-  children,
-}: {
-  selected: boolean
-  title: string
-  note: string
-  onUse?: () => void
-  onHear?: () => void
-  children?: React.ReactNode
-}) {
+function Row({ selected, title, note, onUse, onHear, children }: { selected: boolean; title: string; note: string; onUse?: () => void; onHear?: () => void; children?: React.ReactNode }) {
   return (
     <li className="flex items-center gap-2 py-2.5">
-      <button
-        type="button"
-        onClick={onUse}
-        disabled={!onUse}
-        aria-pressed={selected}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-default"
-      >
+      <button type="button" onClick={onUse} disabled={!onUse} aria-pressed={selected} className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-default">
         <span
           className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${selected ? 'border-moss bg-moss text-moss-ink' : onUse ? 'border-line' : 'border-transparent'}`}
           aria-hidden="true"
@@ -126,7 +106,12 @@ export default function VoicePicker({ open, onClose, langs }: { open: boolean; o
                   {!have && p === undefined && (
                     <button
                       type="button"
-                      onClick={() => downloadQariVoice(v.id).then(() => use(v.id), () => {})}
+                      onClick={() =>
+                        downloadQariVoice(v.id).then(
+                          () => use(v.id),
+                          () => {},
+                        )
+                      }
                       className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-line px-3 text-sm hover:bg-paper-2"
                     >
                       <Icon name="download" size={15} /> Get
@@ -169,7 +154,10 @@ export default function VoicePicker({ open, onClose, langs }: { open: boolean; o
               <ol className="mt-2 list-decimal space-y-1 rounded-xl bg-paper-2 py-3 pr-3 pl-8 text-sm text-ink-2">
                 <li>At portal.azure.com, create a free account, then create a “Speech” resource with the Free (F0) price tier. The free tier stops at its monthly amount instead of charging.</li>
                 <li>Open the resource’s “Keys and Endpoint” page and copy Key 1 and the Location/Region (like eastus).</li>
-                <li>In Vercel, open the qari-reader project › Settings › Environment Variables and add AZURE_SPEECH_KEY and AZURE_SPEECH_REGION. If you haven’t yet, also add QARI_ACCESS_CODE: a passphrase of 20 or more characters.</li>
+                <li>
+                  In Vercel, open the qari-reader project › Settings › Environment Variables and add AZURE_SPEECH_KEY and AZURE_SPEECH_REGION. If you haven’t yet, also add QARI_ACCESS_CODE: a
+                  passphrase of 20 or more characters.
+                </li>
                 <li>Redeploy, then enter the same passphrase under Reading settings › Claude access code. Azure voices then appear here.</li>
               </ol>
             )}

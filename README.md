@@ -117,3 +117,16 @@ This is the central doc for Qari: each working session adds a dated entry here.
 - **Changed:** rewrote the brand doc for the revised brief. Stage 1 is now positioning, audience and use cases, personality and values, core promise, tagline, and should/shouldn't feel like. The three directions moved to Stage 2 (Modern Book, Quiet Study, Reader's Instrument).
 - **Recommended:** keep "Read closely. Listen deeply." as the lead line; test "Read closely. Listen closely." in Stage 2 lockups; "Every word, heard and understood." as a supporting line.
 - **Open:** Newt to answer four questions (tagline, icon meaning, first audience, whether the yellow is fixed) before Stage 2.
+
+### Nov 3, 2026 (interface system and organization)
+- **Changed:** built the audit's system fixes without changing the look. Tokens for type, heights, radii, shadows and control borders (DESIGN.md); shared Button, Choices, Segmented, Chip, Toggle, Section, ActionRow and a confirm sheet in ui.tsx. Sheets keep focus inside and return it.
+  - Reading settings are split into Listening, Reading and Languages tabs.
+  - Player: Speed read and Sleep are now 44px buttons, separate from the time-left text.
+  - Reader header lines up with the text on laptops and has four controls; saved words moved to the Notes tab and the library.
+  - Library: a Continue reading row, a one-line storage notice, one row style for the Add, ⋯ and book menus, and a 20px gutter.
+  - Lookup shows the meaning first, with Save word as the main button.
+  - Saved words has one Anki button with send, download and deck settings.
+  - Speed reader: the word sits at eye level, with the focus letter a little left of centre; Warm up and Read aloud are real buttons.
+  - Removing a book and stopping sync ask in a sheet instead of the browser dialog.
+- **Decided:** brand answers: tagline "Read closely. Listen deeply."; the icon is a ق from a mirrored Q; public launch is the first audience; the yellow can be tuned for the icon and dark theme.
+- **Open:** Newt to approve items in the claude.ai doc "Qari Reader: style changes for approval" (band identity and the audit's visual changes). The tour test loops past the last step (test needs updating, not the app).

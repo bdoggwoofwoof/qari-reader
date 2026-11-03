@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { exportMarkdown, pageRef } from '../lib/quotes'
 import { searchBook, type SearchHit } from '../lib/search'
 import type { DocContent, DocMeta, Highlight } from '../types'
-import { Icon, Sheet } from './ui'
+import { go } from '../App'
+import { Button, Icon, Segmented, Sheet } from './ui'
 
 export type PanelTab = 'contents' | 'notes' | 'search'
 
@@ -72,20 +73,18 @@ export default function BookPanel({
   ]
 
   return (
-    <Sheet open={open} onClose={onClose} title={<span className="truncate" dir="auto">{meta.title}</span>} wide>
-      <div className="mb-3 grid grid-cols-3 gap-1 rounded-xl bg-paper-2 p-1" role="tablist">
-        {tabs.map(([k, label]) => (
-          <button
-            key={k}
-            type="button"
-            role="tab"
-            aria-selected={tab === k}
-            onClick={() => onTab(k)}
-            className={`h-9 rounded-lg text-sm ${tab === k ? 'bg-paper font-semibold shadow-[0_1px_3px_rgb(0_0_0/0.08)]' : 'text-ink-2'}`}
-          >
-            {label}
-          </button>
-        ))}
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={
+        <span className="truncate" dir="auto">
+          {meta.title}
+        </span>
+      }
+      wide
+    >
+      <div className="mb-3">
+        <Segmented label="Book panel" value={tab} onChange={onTab} options={tabs} />
       </div>
 
       {tab === 'contents' && (
@@ -96,7 +95,7 @@ export default function BookPanel({
                 type="button"
                 onClick={() => onChapter(i)}
                 dir="auto"
-                className={`flex w-full items-baseline gap-3 rounded-lg px-2 py-2.5 text-left font-read hover:bg-paper-2 ${i === chapter ? 'bg-wash font-semibold' : ''}`}
+                className={`flex w-full items-baseline gap-3 rounded-xl px-2 py-2.5 text-left font-read hover:bg-paper-2 ${i === chapter ? 'bg-wash font-semibold' : ''}`}
               >
                 <span className="min-w-0 flex-1">{c.title}</span>
                 {c.pages?.[0] && <span className="shrink-0 font-ui text-xs text-ink-3 tabular-nums">p. {c.pages[0].split('–')[0]}</span>}
@@ -115,12 +114,12 @@ export default function BookPanel({
         ) : (
           <>
             <div className="mb-3 flex flex-wrap gap-2">
-              <button type="button" onClick={copyAll} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line px-3 text-sm hover:bg-paper-2">
-                <Icon name="paste" size={16} /> {copied ? 'Copied' : 'Copy all'}
-              </button>
-              <button type="button" onClick={download} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-line px-3 text-sm hover:bg-paper-2">
-                <Icon name="download" size={16} /> Download notes
-              </button>
+              <Button compact icon="paste" onClick={copyAll}>
+                {copied ? 'Copied' : 'Copy all'}
+              </Button>
+              <Button compact icon="download" onClick={download}>
+                Download notes
+              </Button>
             </div>
             <ul className="divide-y divide-line border-y border-line pb-1">
               {highlights.map((h, i) => (
@@ -131,7 +130,7 @@ export default function BookPanel({
                     </div>
                   )}
                   <button type="button" onClick={() => onHighlight(h)} className="block w-full py-3 text-left">
-                    <span className="block border-l-4 border-mark pl-3 font-read text-[0.98rem] leading-snug" dir="auto">
+                    <span className="block border-l-4 border-mark pl-3 font-read text-base leading-snug" dir="auto">
                       {h.text.length > 280 ? h.text.slice(0, 280) + '…' : h.text}
                     </span>
                     {h.note.trim() && (
@@ -148,6 +147,14 @@ export default function BookPanel({
           </>
         ))}
 
+      {tab === 'notes' && (
+        <div className="mt-2 border-t border-line pt-2 pb-2">
+          <Button kind="quiet" compact icon="words" onClick={() => go('words')} className="-ml-3">
+            Saved words, from every book
+          </Button>
+        </div>
+      )}
+
       {tab === 'search' && (
         <div className="pb-2">
           <label className="flex h-11 items-center gap-2 rounded-full border border-line bg-paper-2 px-4 focus-within:border-moss">
@@ -163,9 +170,7 @@ export default function BookPanel({
             />
           </label>
           {done.trim().length >= 2 && (
-            <p className="mt-3 text-sm text-ink-3">
-              {hits.length === 0 ? `No matches for “${done}”.` : `${hits.length === 200 ? '200+' : hits.length} ${hits.length === 1 ? 'match' : 'matches'}`}
-            </p>
+            <p className="mt-3 text-sm text-ink-3">{hits.length === 0 ? `No matches for “${done}”.` : `${hits.length === 200 ? '200+' : hits.length} ${hits.length === 1 ? 'match' : 'matches'}`}</p>
           )}
           <ul className="mt-1 divide-y divide-line">
             {hits.map((h, i) => (
@@ -177,7 +182,7 @@ export default function BookPanel({
                     </span>
                     {h.page && <span className="shrink-0 tabular-nums">{pageRef(h)}</span>}
                   </span>
-                  <span className="block font-read text-[0.95rem] leading-snug text-ink-2" dir="auto">
+                  <span className="block font-read text-base leading-snug text-ink-2" dir="auto">
                     {h.before}
                     <mark className="rounded-sm bg-mark px-0.5 text-ink">{h.match}</mark>
                     {h.after}

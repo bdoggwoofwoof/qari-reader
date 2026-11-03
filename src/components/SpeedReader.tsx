@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { stripArabicMarks, type Span } from '../lib/lang'
 import { useSettings } from '../lib/settings'
 import { RTL_LANGS, type DocContent, type Lang } from '../types'
-import { Icon, IconButton, Sheet } from './ui'
+import { Button, Icon, IconButton, Sheet } from './ui'
 
 interface BlockInfo {
   lang: Lang
@@ -421,26 +421,17 @@ export default function SpeedReader({
         <div className="min-w-0 flex-1 truncate text-center text-sm text-ink-3" dir="auto">
           {section}
         </div>
-        <button
-          type="button"
-          onClick={() => setVoiceOn(!voiceOn)}
-          aria-pressed={voiceOn}
-          className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm ${voiceOn ? 'border-moss bg-wash font-semibold text-ink' : 'border-line text-ink-2'}`}
-        >
-          <Icon name="speaker" size={16} /> Read aloud
-        </button>
+        <Button icon="speaker" onClick={() => setVoiceOn(!voiceOn)} aria-pressed={voiceOn} className={voiceOn ? 'border-moss bg-wash font-semibold' : 'text-ink-2'}>
+          Read aloud
+        </Button>
       </header>
 
       {/* Tap anywhere to play or pause. While paused, tap a word to look it up. */}
-      <div className="relative flex flex-1 cursor-pointer flex-col items-center justify-center px-4" onClick={toggle} role="presentation">
+      <div className="relative flex flex-1 cursor-pointer flex-col items-center justify-start px-4 pt-[clamp(4rem,24vh,14rem)]" onClick={toggle} role="presentation">
         {/* Guide marks above and below the focus letter. */}
         <div className="relative w-full max-w-xl">
-          <div className="absolute inset-x-0 -top-7 border-t border-line" aria-hidden="true">
-            <span className="absolute left-1/2 top-0 h-3 w-px -translate-x-1/2 bg-ink-3" />
-          </div>
-          <div className="absolute inset-x-0 -bottom-7 border-b border-line" aria-hidden="true">
-            <span className="absolute bottom-0 left-1/2 h-3 w-px -translate-x-1/2 bg-ink-3" />
-          </div>
+          <div className="absolute inset-x-0 -top-7 border-t border-line" aria-hidden="true" />
+          <div className="absolute inset-x-0 -bottom-7 border-b border-line" aria-hidden="true" />
           {parts && cur ? (
             <div
               onClick={(e) => {
@@ -458,13 +449,18 @@ export default function SpeedReader({
               {cur.rtl ? (
                 <div className="font-arabic text-center text-[clamp(2rem,9vw,3.25rem)] leading-tight whitespace-nowrap" dir="rtl" lang="ar" aria-live="off">
                   {parts.before}
-                  <span className="text-[#d9342b]">{parts.focus}</span>
+                  <span className="text-focus">{parts.focus}</span>
                   {parts.after}
                 </div>
               ) : (
-                <div className="font-read grid grid-cols-[1fr_auto_1fr] text-[clamp(2rem,9vw,3.25rem)] leading-tight whitespace-nowrap" style={{ fontVariationSettings: "'opsz' 40" }} aria-live="off">
+                // The focus letter sits a little left of centre (2 : 3), where the eye lands in a word, so long words fit.
+                <div className="font-read grid grid-cols-[2fr_auto_3fr] text-[clamp(2rem,9vw,3.25rem)] leading-tight whitespace-nowrap" style={{ fontVariationSettings: "'opsz' 40" }} aria-live="off">
                   <span className="text-right">{parts.before}</span>
-                  <span className="font-semibold text-[#d9342b]">{parts.focus}</span>
+                  <span className="relative font-semibold text-focus">
+                    {parts.focus}
+                    <span className="absolute -top-7 left-1/2 h-3 w-px -translate-x-1/2 bg-ink-3" aria-hidden="true" />
+                    <span className="absolute -bottom-7 left-1/2 h-3 w-px -translate-x-1/2 bg-ink-3" aria-hidden="true" />
+                  </span>
                   <span className="text-left">{parts.after}</span>
                 </div>
               )}
@@ -477,7 +473,7 @@ export default function SpeedReader({
         {lookupHint && context && (
           <div className="mt-14 w-full max-w-xl" onClick={(e) => e.stopPropagation()} role="presentation">
             <p className="mb-2 text-center text-xs text-ink-3">Tap any word to look it up · tap the space around to keep reading</p>
-            <p className="text-center text-[1.05rem] leading-[2.1]" dir={context.rtl ? 'rtl' : 'auto'} lang={cur.lang}>
+            <p className="text-center text-base leading-[2.1]" dir={context.rtl ? 'rtl' : 'auto'} lang={cur.lang}>
               {context.pieces.map((pc, pi) => {
                 const last = pi === context.pieces.length - 1
                 const out: React.ReactNode[] = []
@@ -519,18 +515,18 @@ export default function SpeedReader({
       </div>
 
       <footer className="mx-auto w-full max-w-md px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <div className="mb-2 flex justify-between text-xs tabular-nums text-ink-3">
+        <div className="mb-2 flex min-h-9 items-center justify-between gap-2 text-xs tabular-nums text-ink-3">
           <span>{voiceOn ? 'The voice sets the pace' : `${left < 60 ? 'under a minute' : `${Math.round(left / 60)} min`} left in section`}</span>
           {voiceOn ? (
             <span>{atEnd && !isPlaying ? 'The end' : ''}</span>
           ) : warm ? (
-            <button type="button" onClick={stopWarm} className="inline-flex items-center gap-1 rounded-full bg-wash px-2 py-0.5 font-semibold text-ink" aria-label="Stop warming up and keep this speed">
-              {warm.wpm >= warm.goal ? `Goal reached: ${warm.goal}` : `Warming up to ${warm.goal}`} <Icon name="close" size={12} />
-            </button>
+            <Button compact onClick={stopWarm} aria-label="Stop warming up and keep this speed" className="border-moss bg-wash font-semibold">
+              {warm.wpm >= warm.goal ? `Goal reached: ${warm.goal}` : `Warming up to ${warm.goal}`} <Icon name="close" size={14} />
+            </Button>
           ) : (
-            <button type="button" onClick={() => setWarmOpen(true)} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 hover:bg-paper-2">
-              <Icon name="rise" size={13} /> Warm up
-            </button>
+            <Button compact icon="rise" onClick={() => setWarmOpen(true)} className="text-ink-2">
+              Warm up
+            </Button>
           )}
         </div>
         {warm && warm.wpm < warm.goal && (
@@ -540,12 +536,22 @@ export default function SpeedReader({
         )}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1">
-            <IconButton icon="minus" label="Slower" onClick={() => (voiceOn ? stepRate(-1) : warm ? setWarm({ ...warm, wpm: roundWpm(warm.wpm - 25), elapsed: 0 }) : setWpm(wpm - 25))} className="border border-line" />
+            <IconButton
+              icon="minus"
+              label="Slower"
+              onClick={() => (voiceOn ? stepRate(-1) : warm ? setWarm({ ...warm, wpm: roundWpm(warm.wpm - 25), elapsed: 0 }) : setWpm(wpm - 25))}
+              className="border border-edge"
+            />
             <span className="w-16 text-center text-sm font-semibold tabular-nums" aria-live="polite">
               {voiceOn ? `${Number.isInteger(rate) ? rate.toFixed(1) : Number(rate.toFixed(2))}×` : speed}
-              <span className="block text-[0.65rem] font-normal text-ink-3">{voiceOn ? 'voice speed' : 'words/min'}</span>
+              <span className="block text-xs font-normal text-ink-3">{voiceOn ? 'voice speed' : 'words/min'}</span>
             </span>
-            <IconButton icon="plus" label="Faster" onClick={() => (voiceOn ? stepRate(1) : warm ? setWarm({ ...warm, wpm: roundWpm(warm.wpm + 25), elapsed: 0 }) : setWpm(wpm + 25))} className="border border-line" />
+            <IconButton
+              icon="plus"
+              label="Faster"
+              onClick={() => (voiceOn ? stepRate(1) : warm ? setWarm({ ...warm, wpm: roundWpm(warm.wpm + 25), elapsed: 0 }) : setWpm(wpm + 25))}
+              className="border border-edge"
+            />
           </div>
           <div className="flex items-center gap-1">
             <IconButton icon="prev" label="Back a sentence" onClick={back} />
@@ -562,7 +568,9 @@ export default function SpeedReader({
         </div>
       </footer>
       <Sheet open={warmOpen} onClose={() => setWarmOpen(false)} title="Warm up">
-        <p className="mb-4 text-sm text-ink-2">Start at a comfortable speed and let Qari speed up a little at a time while you read. It only counts time you’re reading, and you can slow it down with − at any point.</p>
+        <p className="mb-4 text-sm text-ink-2">
+          Start at a comfortable speed and let Qari speed up a little at a time while you read. It only counts time you’re reading, and you can slow it down with − at any point.
+        </p>
         {(
           [
             ['Start at', 'start'],
@@ -572,11 +580,11 @@ export default function SpeedReader({
           <div key={key} className="mb-3 flex items-center justify-between">
             <span className="font-semibold">{label}</span>
             <span className="flex items-center gap-1">
-              <IconButton icon="minus" label={`${label}: slower`} onClick={() => setPlan({ [key]: roundWpm(warmPlan[key] - 25) })} className="border border-line" />
+              <IconButton icon="minus" label={`${label}: slower`} onClick={() => setPlan({ [key]: roundWpm(warmPlan[key] - 25) })} className="border border-edge" />
               <span className="w-20 text-center tabular-nums">
                 {warmPlan[key]} <span className="text-xs text-ink-3">wpm</span>
               </span>
-              <IconButton icon="plus" label={`${label}: faster`} onClick={() => setPlan({ [key]: roundWpm(warmPlan[key] + 25) })} className="border border-line" />
+              <IconButton icon="plus" label={`${label}: faster`} onClick={() => setPlan({ [key]: roundWpm(warmPlan[key] + 25) })} className="border border-edge" />
             </span>
           </div>
         ))}
@@ -596,12 +604,14 @@ export default function SpeedReader({
           ))}
         </div>
         <p className="mb-3 text-sm text-ink-3">
-          {warmPlan.goal > warmPlan.start ? `About ${fmtClimb(Math.ceil((warmPlan.goal - warmPlan.start) / pace.step) * pace.every)} of reading to reach your goal.` : 'Set a goal above where you start.'}
+          {warmPlan.goal > warmPlan.start
+            ? `About ${fmtClimb(Math.ceil((warmPlan.goal - warmPlan.start) / pace.step) * pace.every)} of reading to reach your goal.`
+            : 'Set a goal above where you start.'}
           {voiceOn ? ' Warm-up reads silently, so Read aloud turns off.' : ''}
         </p>
-        <button type="button" onClick={startWarm} className="mb-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-moss font-semibold text-moss-ink">
+        <Button kind="primary" onClick={startWarm} className="mb-2 w-full">
           <Icon name="rise" size={18} /> Start warm-up
-        </button>
+        </Button>
       </Sheet>
     </div>
   )

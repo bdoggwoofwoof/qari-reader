@@ -15,6 +15,17 @@
   --font-read: var(--read-face, 'Literata Variable'), var(--arabic-face), Georgia, serif;
   --font-ui: 'Instrument Sans Variable', var(--arabic-face), system-ui, sans-serif;
   --font-arabic: var(--arabic-face), 'Literata Variable', sans-serif;
+
+  /* ----- Interface system (see DESIGN.md) -----
+     Type: xs 12 · sm 14 · base 16 · lg 18 · xl 20. Display sizes (2xl+) only for a single word or the wordmark.
+     Heights: h-9 36 compact · h-11 44 default · h-14 56 play.
+     Radii: full (pills, round buttons) · xl 12 (boxes, tiles, inputs) · 2xl 16 (sheets).
+     Shadows: float (anything floating over the page) · sheet (dialogs). */
+  --shadow-float: 0 4px 18px rgb(0 0 0 / 0.1);
+  --shadow-sheet: 0 -8px 40px rgb(0 0 0 / 0.12);
+  --color-edge: var(--edge);
+  /* The speed reader's focus letter: the one deliberate red in Qari. */
+  --color-focus: #d9342b;
 }
 
 :root {
@@ -29,6 +40,9 @@
   --wash: #d7e4da;
   --mark: #f3c969;
   --danger: #a23b2a;
+  /* Border of interactive controls (inputs, outline buttons, tiles). Same as line for now;
+     the 3:1 values (#7d867f / #887b66 / #666f69) are waiting on approval. */
+  --edge: var(--line);
   --arabic-face: 'Readex Pro Variable';
   --arabic-size: 1.04em;
   --arabic-leading: 1.95;
@@ -75,6 +89,11 @@ body {
   font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: var(--wash);
+  color: var(--ink);
 }
 
 :focus-visible {
